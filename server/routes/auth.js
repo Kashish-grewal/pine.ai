@@ -1,109 +1,354 @@
 const express = require('express');
-const router = express.Router();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const pool = require('../db/db');
+const crypto = require('crypto');
+const { body, validationResult } = require('express-validator');
+const rateLimit = require('express-rate-limit');
+const { query } = require('../db/db');
+const { protect } = require('../middleware/auth');
 
-// REGISTER
-router.post('/register', async (req, res) => {
-    console.log("Register route hit");
-  const { email, password } = req.body;
+const router = express.Router();
 
-  // Check all fields are provided
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
-  }
-
-  try {
-    // Check if user already exists
-    const existingUser = await pool.query(
-      'SELECT * FROM users WHERE email = $1',
-      [email]
-    );
-
-    if (existingUser.rows.length > 0) {
-      return res.status(400).json({ error: 'Email already registered' });
-    }
-
-    // Hash the password (never save plain text passwords)
-    const saltRounds = 10;
-    const password_hash = await bcrypt.hash(password, saltRounds);
-
-    // Save the new user to the database
-    const newUser = await pool.query(
-      'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING user_id, email, created_at',
-      [email, password_hash]
-    );
-
-    // Create a JWT token for them immediately
-    const token = jwt.sign(
-      { user_id: newUser.rows[0].user_id, email: newUser.rows[0].email },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.status(201).json({
-      message: 'Account created successfully',
-      token,
-      user: {
-        user_id: newUser.rows[0].user_id,
-        email: newUser.rows[0].email
-      }
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error during registration' });
-  }
+// ================================================================
+// AUTH-SPECIFIC RATE LIMITER
+// Stricter than the global limiter — 10 attempts per 15 minutes.
+// Applied only to login and register below.
+// Prevents brute force password attacks.
+// ================================================================
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many attempts. Please try again in 15 minutes.',
+  },
 });
 
-// LOGIN
-router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
+// ================================================================
+// TOKEN HELPERS
+// Two tokens are issued on every login:
+//
+// ACCESS TOKEN (15 min)
+//   - Short-lived. Sent with every API request.
+//   - If stolen, it expires quickly.
+//   - Stored only in memory on the frontend (never localStorage).
+//
+// REFRESH TOKEN (7 days)
+//   - Long-lived. Sent only to POST /refresh.
+//   - Stored as a SHA-256 hash in the DB (never raw).
+//   - Can be instantly revoked by marking is_revoked = TRUE.
+// ================================================================
+const generateAccessToken = (userId, email) => {
+  return jwt.sign(
+    { userId, email },
+    process.env.JWT_ACCESS_SECRET,
+    { expiresIn: '15m' }
+  );
+};
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
-  }
+const generateRefreshToken = (userId) => {
+  // crypto.randomBytes gives a cryptographically secure random string
+  // Much stronger than Math.random()
+  const token = crypto.randomBytes(64).toString('hex');
 
+  // We hash before storing — if DB is ever breached,
+  // the attacker gets hashes, not usable tokens
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+
+  return { token, hash };
+};
+
+const storeRefreshToken = async (userId, hash) => {
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  await query(
+    `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+     VALUES ($1, $2, $3)`,
+    [userId, hash, expiresAt]
+  );
+};
+
+// ================================================================
+// VALIDATION RULES
+// express-validator checks inputs before they touch the DB.
+// If validation fails, we return errors immediately.
+// Never trust client input.
+// ================================================================
+const registerValidation = [
+  body('email')
+    .isEmail().withMessage('Please provide a valid email address.')
+    .normalizeEmail(), // lowercases, removes dots in gmail etc.
+  body('password')
+    .isLength({ min: 8 }).withMessage('Password must be at least 8 characters.')
+    .matches(/\d/).withMessage('Password must contain at least one number.'),
+  body('full_name')
+    .optional()
+    .trim()
+    .isLength({ max: 100 }).withMessage('Name must be under 100 characters.'),
+];
+
+const loginValidation = [
+  body('email').isEmail().withMessage('Invalid email.').normalizeEmail(),
+  body('password').notEmpty().withMessage('Password is required.'),
+];
+
+// ================================================================
+// POST /api/v1/auth/register
+// ================================================================
+router.post('/register', authLimiter, registerValidation, async (req, res, next) => {
   try {
-    // Find the user by email
-    const result = await pool.query(
-      'SELECT * FROM users WHERE email = $1',
+    // 1. Check validation errors first
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed.',
+        errors: errors.array().map(e => ({ field: e.path, message: e.msg })),
+      });
+    }
+
+    const { email, password, full_name } = req.body;
+
+    // 2. Check if user already exists
+    const existing = await query(
+      'SELECT user_id FROM users WHERE email = $1',
       [email]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(400).json({ error: 'Invalid email or password' });
+    if (existing.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'An account with this email already exists.',
+      });
     }
+
+    // 3. Hash the password
+    // Cost factor 12 = takes ~250ms to hash.
+    // Slow enough to make brute force painful, fast enough for users.
+    const password_hash = await bcrypt.hash(password, 12);
+
+    // 4. Insert new user
+    const result = await query(
+      `INSERT INTO users (email, full_name, password_hash, auth_provider)
+       VALUES ($1, $2, $3, 'local')
+       RETURNING user_id, email, full_name, created_at`,
+      [email, full_name || null, password_hash]
+    );
 
     const user = result.rows[0];
 
-    // Compare the password they typed with the hashed one in DB
-    const validPassword = await bcrypt.compare(password, user.password_hash);
+    // 5. Issue tokens
+    const accessToken = generateAccessToken(user.user_id, user.email);
+    const { token: refreshToken, hash: refreshHash } = generateRefreshToken(user.user_id);
+    await storeRefreshToken(user.user_id, refreshHash);
 
-    if (!validPassword) {
-      return res.status(400).json({ error: 'Invalid email or password' });
-    }
-
-    // Create a JWT token
-    const token = jwt.sign(
-      { user_id: user.user_id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.json({
-      message: 'Login successful',
-      token,
-      user: {
-        user_id: user.user_id,
-        email: user.email
-      }
+    res.status(201).json({
+      success: true,
+      message: 'Account created successfully.',
+      data: {
+        user: {
+          id: user.user_id,
+          email: user.email,
+          full_name: user.full_name,
+        },
+        accessToken,
+        refreshToken,
+      },
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error during login' });
+    next(err); // Passes to global error handler in index.js
+  }
+});
+
+// ================================================================
+// POST /api/v1/auth/login
+// ================================================================
+router.post('/login', authLimiter, loginValidation, async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed.',
+        errors: errors.array().map(e => ({ field: e.path, message: e.msg })),
+      });
+    }
+
+    const { email, password } = req.body;
+
+    // 1. Find user
+    const result = await query(
+      'SELECT user_id, email, full_name, password_hash, auth_provider FROM users WHERE email = $1',
+      [email]
+    );
+
+    const user = result.rows[0];
+
+    // 2. Generic error message — never tell the attacker which part is wrong
+    // "email not found" tells them valid emails. We don't do that.
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password.',
+      });
+    }
+
+    // 3. Block Google OAuth users from logging in with a password
+    if (user.auth_provider === 'google') {
+      return res.status(400).json({
+        success: false,
+        message: 'This account uses Google Sign-In. Please log in with Google.',
+      });
+    }
+
+    // 4. Compare password
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password.',
+      });
+    }
+
+    // 5. Issue tokens
+    const accessToken = generateAccessToken(user.user_id, user.email);
+    const { token: refreshToken, hash: refreshHash } = generateRefreshToken(user.user_id);
+    await storeRefreshToken(user.user_id, refreshHash);
+
+    res.json({
+      success: true,
+      message: 'Logged in successfully.',
+      data: {
+        user: {
+          id: user.user_id,
+          email: user.email,
+          full_name: user.full_name,
+        },
+        accessToken,
+        refreshToken,
+      },
+    });
+
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ================================================================
+// POST /api/v1/auth/refresh
+// Called silently by the frontend when access token expires.
+// User never sees this happen — it's automatic.
+// ================================================================
+router.post('/refresh', async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        success: false,
+        message: 'Refresh token required.',
+      });
+    }
+
+    // Hash the incoming token and look it up in the DB
+    const hash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+
+    const result = await query(
+      `SELECT rt.token_id, rt.user_id, rt.expires_at, rt.is_revoked,
+              u.email, u.full_name
+       FROM refresh_tokens rt
+       JOIN users u ON rt.user_id = u.user_id
+       WHERE rt.token_hash = $1`,
+      [hash]
+    );
+
+    const tokenRow = result.rows[0];
+
+    if (!tokenRow) {
+      return res.status(401).json({ success: false, message: 'Invalid refresh token.' });
+    }
+
+    if (tokenRow.is_revoked) {
+      return res.status(401).json({ success: false, message: 'Refresh token has been revoked.' });
+    }
+
+    if (new Date(tokenRow.expires_at) < new Date()) {
+      return res.status(401).json({ success: false, message: 'Refresh token expired. Please log in again.' });
+    }
+
+    // Issue a new access token
+    const accessToken = generateAccessToken(tokenRow.user_id, tokenRow.email);
+
+    res.json({
+      success: true,
+      data: { accessToken },
+    });
+
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ================================================================
+// POST /api/v1/auth/logout
+// Revokes the refresh token in the DB — dead instantly.
+// The access token will expire on its own in ≤15 minutes.
+// ================================================================
+router.post('/logout', protect, async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (refreshToken) {
+      const hash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+      await query(
+        'UPDATE refresh_tokens SET is_revoked = TRUE WHERE token_hash = $1',
+        [hash]
+      );
+    }
+
+    res.json({ success: true, message: 'Logged out successfully.' });
+
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ================================================================
+// GET /api/v1/auth/me
+// Returns the current logged-in user's profile.
+// Requires a valid access token — protect middleware handles that.
+// ================================================================
+router.get('/me', protect, async (req, res, next) => {
+  try {
+    const result = await query(
+      'SELECT user_id, email, full_name, avatar_url, auth_provider, created_at FROM users WHERE user_id = $1',
+      [req.user.userId]
+    );
+
+    const user = result.rows[0];
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        user: {
+          id: user.user_id,
+          email: user.email,
+          full_name: user.full_name,
+          avatar_url: user.avatar_url,
+          auth_provider: user.auth_provider,
+          member_since: user.created_at,
+        },
+      },
+    });
+
+  } catch (err) {
+    next(err);
   }
 });
 

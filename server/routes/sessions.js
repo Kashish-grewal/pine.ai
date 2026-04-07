@@ -1,3 +1,4 @@
+const { processSession } = require('../services/pipeline');
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -54,7 +55,7 @@ router.post(
       // of where it's deployed.
       // -------------------------------------------------------------------
       const result = await pool.query(
-         `INSERT INTO sessions 
+        `INSERT INTO sessions 
            (user_id, title, description, audio_url, audio_format, file_size_bytes, status)
          VALUES ($1, $2, $3, $4, $5, $6, 'pending')
          RETURNING session_id, title, description, audio_format, file_size_bytes, status, created_at`,
@@ -70,7 +71,8 @@ router.post(
 
       const session = result.rows[0];
 
-      return res.status(201).json({
+      // Respond immediately — don't make the user wait for transcription
+      res.status(201).json({
         success: true,
         message: 'Audio uploaded successfully. Processing will begin shortly.',
         data: {
@@ -82,12 +84,19 @@ router.post(
           createdAt: session.created_at,
         },
       });
+
+      // Fire pipeline in the background — non-blocking
+      // filePath is the full disk path multer saved the file to
+      processSession(session.session_id, filePath).catch((err) => {
+        console.error('[Upload] Pipeline trigger failed:', err.message);
+      });
+
     } catch (err) {
       // -------------------------------------------------------------------
       // If the DB insert fails, delete the file we just saved to disk.
       // Orphaned files on disk with no DB record are a storage leak.
       // -------------------------------------------------------------------
-      fs.unlink(filePath, () => {}); // fire and forget — don't block the error response
+      fs.unlink(filePath, () => { }); // fire and forget — don't block the error response
       next(err);
     }
   }
@@ -177,10 +186,11 @@ router.get('/:id', protect, async (req, res, next) => {
       success: true,
       data: {
         session,
-        transcript: transcriptResult.rows[0] || null,
-        summary: summaryResult.rows[0] || null,
+        transcript: transcriptResult.rows,        // ALL segments (array), not just row[0]
+        summary:    summaryResult.rows[0] || null, // Still single summary object
       },
     });
+
   } catch (err) {
     next(err);
   }
@@ -218,7 +228,7 @@ router.delete('/:id', protect, async (req, res, next) => {
     // Delete audio file from disk
     if (audio_url) {
       const filePath = path.join(__dirname, '..', 'uploads', 'temp', audio_url);
-      fs.unlink(filePath, () => {}); // fire and forget
+      fs.unlink(filePath, () => { }); // fire and forget
     }
 
     return res.json({

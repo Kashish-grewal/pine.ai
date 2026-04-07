@@ -13,6 +13,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@deepgram/sdk": "^3.13.0",
+    "assemblyai": "^4.29.0",
     "axios": "^1.14.0",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",

@@ -31,8 +31,22 @@ app.use(helmet());
 // ---------------------------------------------------------------------------
 // CORS
 // ---------------------------------------------------------------------------
+const configuredClientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+
 const corsOptions = {
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: (origin, cb) => {
+    // Allow non-browser clients (curl, server-to-server) with no Origin header.
+    if (!origin) return cb(null, true);
+
+    if (origin === configuredClientUrl) return cb(null, true);
+
+    // In development, allow localhost/127.0.0.1 on any port.
+    if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/i.test(origin)) {
+      return cb(null, true);
+    }
+
+    return cb(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -78,6 +92,23 @@ const sessionRoutes = require('./routes/sessions');
 
 app.use('/api/v1/auth', authLimiter, authRoutes);
 app.use('/api/v1/sessions', sessionRoutes);
+
+// ---------------------------------------------------------------------------
+// API root
+// ---------------------------------------------------------------------------
+// Helpful when opening http://localhost:5001 in a browser.
+// ---------------------------------------------------------------------------
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'pine.ai backend is running.',
+    docs: {
+      health: '/health',
+      authBase: '/api/v1/auth',
+      sessionsBase: '/api/v1/sessions',
+    },
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Health check

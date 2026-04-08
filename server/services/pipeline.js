@@ -1,19 +1,29 @@
-const fs = require('fs');
-const { pool } = require('../db/db');
-const { transcribeAudio } = require('./transcription');
+const fs   = require('fs');
+const { pool }           = require('../db/db');
+const { transcribeAudio} = require('./transcription');
+
+// Keep the API alive even if the optional speaker post-process module is missing.
+let correctSpeakers = (utterances) => utterances;
+let relabelSpeakers = (utterances) => utterances;
+let detectCandidateLabel = () => null;
+
+try {
+  ({ correctSpeakers, relabelSpeakers, detectCandidateLabel } = require('./postprocess'));
+} catch (err) {
+  console.warn('[Pipeline] postprocess.js not available; continuing without speaker correction:', err.message);
+}
 
 // ================================================================
 // PROCESSING PIPELINE
 // ================================================================
-// Called after the upload route responds to the client.
-// Runs entirely in the background — the user never waits for this.
-//
 // Flow:
 //   1. Set status = 'processing'
-//   2. Call Deepgram → get diarized segments
-//   3. Save each segment to the transcripts table
-//   4. Set status = 'completed' + save duration
-//   5. Delete audio file from disk (ephemeral storage policy)
+//   2. Fetch session metadata (participants list, speaker count)
+//   3. Call AssemblyAI → get diarized utterances
+//   4. Post-process: fix misattributed speaker labels  ← NEW
+//   5. Save each corrected segment to the transcripts table
+//   6. Set status = 'completed' + save duration
+//   7. Delete audio file from disk
 //
 // If anything fails → set status = 'failed' + save error message
 // ================================================================
@@ -30,13 +40,65 @@ const processSession = async (sessionId, filePath) => {
       [sessionId]
     );
 
-    // Step 2 — Transcribe audio with Deepgram
-    console.log(`[Pipeline] Sending to Deepgram...`);
-    const { segments, duration } = await transcribeAudio(filePath);
+    // ── Step 2 — Fetch session metadata ─────────────────────────────
+    // We need `participants` (JSONB array of names) so we can:
+    //   a) pass speakers_expected to AssemblyAI
+    //   b) boost name recognition
+    //   c) relabel "Speaker A" → "Monica" after the fact
+    // ──────────────────────────────────────────────────────────────────
+    const { rows } = await pool.query(
+      `SELECT participants FROM sessions WHERE session_id = $1`,
+      [sessionId]
+    );
+
+    const participants = rows[0]?.participants || [];       // e.g. ["Monica", "Interviewer"]
+    const speakersExpected = participants.length > 0
+      ? participants.length
+      : undefined;
+
+    // ── Step 3 — Transcribe audio with AssemblyAI ────────────────────
+    console.log(`[Pipeline] Sending to AssemblyAI...`);
+    const { segments, duration, rawUtterances } = await transcribeAudio(filePath, {
+      speakersExpected,
+      participants,
+    });
     console.log(`[Pipeline] Got ${segments.length} segments, duration ${duration}s`);
 
-    // Step 3 — Save each diarized segment to transcripts table
-    for (const segment of segments) {
+    // ── Step 4 — Post-process speaker labels ────────────────────────
+    // Only runs if we have raw utterances (not the single-segment fallback)
+    let processedUtterances = rawUtterances;
+
+    if (rawUtterances.length > 0) {
+      // Rule-based correction (honorifics, name detection, short orphans)
+      processedUtterances = correctSpeakers(rawUtterances, { participantNames: participants });
+
+      // If the first participant name is the candidate, relabel A→"Monica" etc.
+      if (participants.length > 0) {
+        const candidateLabel = detectCandidateLabel(processedUtterances);
+        if (candidateLabel) {
+          processedUtterances = relabelSpeakers(
+            processedUtterances,
+            candidateLabel,
+            participants[0]       // treat first name as the candidate
+          );
+        }
+      }
+    }
+
+    // Convert processed utterances back to the segments shape the DB expects.
+    // If post-processing ran, use processedUtterances; otherwise fall back to
+    // the segments that transcribeAudio() already built.
+    const finalSegments = rawUtterances.length > 0
+      ? processedUtterances.map((u) => ({
+          speaker_label: u.speaker,                // now "Monica" / "Panelist 1" etc.
+          start_time:    u.start / 1000,
+          end_time:      u.end   / 1000,
+          text_segment:  u.text,
+        }))
+      : segments;
+
+    // ── Step 5 — Save each segment to transcripts table ─────────────
+    for (const segment of finalSegments) {
       await pool.query(
         `INSERT INTO transcripts (session_id, speaker_label, start_time, end_time, text_segment)
          VALUES ($1, $2, $3, $4, $5)`,
@@ -50,7 +112,7 @@ const processSession = async (sessionId, filePath) => {
       );
     }
 
-    // Step 4 — Mark session as completed
+    // ── Step 6 — Mark session as completed ──────────────────────────
     await pool.query(
       `UPDATE sessions
        SET status = 'completed', duration_secs = $2, updated_at = NOW()
@@ -58,8 +120,7 @@ const processSession = async (sessionId, filePath) => {
       [sessionId, Math.round(duration)]
     );
 
-    // Step 5 — Delete the audio file from disk
-    // We never store audio permanently — privacy + storage policy
+    // ── Step 7 — Delete audio file ───────────────────────────────────
     fs.unlink(filePath, (err) => {
       if (err) console.warn(`[Pipeline] Could not delete file: ${filePath}`);
     });
@@ -69,13 +130,12 @@ const processSession = async (sessionId, filePath) => {
   } catch (err) {
     console.error(`[Pipeline] ❌ Session ${sessionId} failed:`, err.message);
 
-    // Save the error so the frontend can show what went wrong
     await pool.query(
       `UPDATE sessions
        SET status = 'failed', error_message = $2, updated_at = NOW()
        WHERE session_id = $1`,
       [sessionId, err.message]
-    ).catch(() => {}); // Don't crash if this update also fails
+    ).catch(() => {});
   }
 };
 

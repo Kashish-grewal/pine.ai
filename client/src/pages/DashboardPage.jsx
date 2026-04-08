@@ -47,16 +47,18 @@ export default function DashboardPage() {
       const form = new FormData();
       form.append('audio', file);
 
-      const res = await api.post('/sessions/upload', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const res = await api.post('/sessions/upload', form);
 
       const { sessionId, title, status, audioFormat, fileSizeBytes, createdAt } = res.data.data;
 
       setSession({ session_id: sessionId, title, status, audio_format: audioFormat, file_size_bytes: fileSizeBytes, created_at: createdAt });
       startPolling(sessionId);
     } catch (err) {
-      setUploadError(err.response?.data?.message || 'Upload failed. Please try again.');
+      if (!err.response) {
+        setUploadError('Cannot connect to server. Make sure the backend is running on port 5001.');
+      } else {
+        setUploadError(err.response?.data?.message || `Upload failed (${err.response.status}).`);
+      }
     } finally {
       setUploading(false);
     }

@@ -66,7 +66,7 @@ app.use(express.json({ limit: '10kb' })); // 10kb cap prevents JSON bomb attacks
 // ---------------------------------------------------------------------------
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
+  max: 500,                 // 500 — UI polls status frequently during transcription
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many requests, please try again later.', code: 'RATE_LIMITED' },

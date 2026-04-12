@@ -112,7 +112,8 @@ p { line-height: 1.6; color: var(--text-2); }
   text-transform: uppercase;
 }
 
-.field input {
+.field input,
+.field select {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -127,7 +128,8 @@ p { line-height: 1.6; color: var(--text-2); }
 
 .field input::placeholder { color: var(--text-3); }
 
-.field input:focus {
+.field input:focus,
+.field select:focus {
   border-color: var(--border-hover);
 }
 
@@ -246,6 +248,30 @@ p { line-height: 1.6; color: var(--text-2); }
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.upload-metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.upload-meta-note {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.upload-section .field {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  gap: 6px;
+}
+
+.upload-section .field input,
+.upload-section .field select {
+  background: var(--surface-2);
 }
 
 .upload-zone {
@@ -453,6 +479,7 @@ p { line-height: 1.6; color: var(--text-2); }
 @media (max-width: 640px) {
   .auth-card { padding: 36px 24px; }
   .main-content { padding: 32px 20px; }
+  .upload-metadata-grid { grid-template-columns: 1fr; }
   .upload-zone { padding: 48px 20px; }
   .transcript-segment { grid-template-columns: 1fr; gap: 8px; }
   .header { padding: 0 20px; }

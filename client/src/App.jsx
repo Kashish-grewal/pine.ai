@@ -4,7 +4,7 @@ import { authStore } from './store/authStore';
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
 
-// ================================================================
+// ===================================== ===========================
 // APP — Routing
 // ================================================================
 // /           → AuthPage   (redirects to /dashboard if logged in)

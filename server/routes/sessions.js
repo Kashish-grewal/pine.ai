@@ -5,6 +5,11 @@ const fs = require('fs');
 const { pool } = require('../db/db');
 const { protect } = require('../middleware/auth');
 const { uploadAudio, handleMulterError } = require('../middleware/upload');
+const {
+  normalizeExpectedSpeakerCount,
+  normalizeLanguageLocale,
+  sanitizePhraseArray,
+} = require('../services/transcriptionMetadata');
 
 const router = express.Router();
 
@@ -42,12 +47,41 @@ router.post(
     // Optional metadata the client can send alongside the file
     const title = req.body.title?.trim() || originalname;
     const description = req.body.description?.trim() || null;
+    const participantNames = sanitizePhraseArray(req.body.participant_names, {
+      maxItems: 20,
+      maxLength: 80,
+    });
+    const expectedSpeakerCount = normalizeExpectedSpeakerCount(
+      req.body.expected_speaker_count,
+      participantNames.length
+    );
+    const languageLocale = normalizeLanguageLocale(req.body.language_locale);
+    const userKeywords = sanitizePhraseArray(req.body.user_keywords, {
+      maxItems: 40,
+      maxLength: 80,
+    });
+
+    if (participantNames.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'participant_names is required and must contain at least one name.',
+        code: 'INVALID_PARTICIPANTS',
+      });
+    }
+
+    if (!expectedSpeakerCount) {
+      return res.status(400).json({
+        success: false,
+        message: 'expected_speaker_count is required and must be between 1 and 20.',
+        code: 'INVALID_SPEAKER_COUNT',
+      });
+    }
 
     try {
       // -------------------------------------------------------------------
       // Create the session row
-      // -------------------------------------------------------------------
-      // status starts as 'pending' — the transcription job will move it
+      // -------------------------- ------------------------------- ----------
+      // status starts as 'pending' — t he transcription job will move it
       // through 'transcribing' → 'processing' → 'completed' (or 'failed').
       //
       // audio_url stores the relative path on disk. We store just the
@@ -56,9 +90,15 @@ router.post(
       // -------------------------------------------------------------------
       const result = await pool.query(
         `INSERT INTO sessions 
-           (user_id, title, description, audio_url, audio_format, file_size_bytes, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
-         RETURNING session_id, title, description, audio_format, file_size_bytes, status, created_at`,
+           (
+             user_id, title, description, audio_url, audio_format, file_size_bytes,
+             participants, expected_speaker_count, language_locale, user_keywords,
+             status
+           )
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, 'pending')
+         RETURNING session_id, title, description, audio_format, file_size_bytes,
+                   participants, expected_speaker_count, language_locale, user_keywords,
+                   status, created_at`,
         [
           req.user.userId,
           title,
@@ -66,6 +106,10 @@ router.post(
           filename,          // store only the generated filename
           mimetype,
           size,
+          JSON.stringify(participantNames),
+          expectedSpeakerCount,
+          languageLocale,
+          JSON.stringify(userKeywords),
         ]
       );
 
@@ -81,6 +125,10 @@ router.post(
           status: session.status,
           audioFormat: session.audio_format,
           fileSizeBytes: session.file_size_bytes,
+          participants: session.participants,
+          expectedSpeakerCount: session.expected_speaker_count,
+          languageLocale: session.language_locale,
+          userKeywords: session.user_keywords,
           createdAt: session.created_at,
         },
       });
@@ -113,7 +161,8 @@ router.get('/', protect, async (req, res, next) => {
     const result = await pool.query(
       `SELECT 
          session_id, title, description, audio_format, file_size_bytes,
-         status, duration_secs, created_at, updated_at
+        participants, expected_speaker_count, language_locale, user_keywords,
+        auto_keywords, status, duration_secs, created_at, updated_at
        FROM sessions
        WHERE user_id = $1
        ORDER BY created_at DESC`,
@@ -149,7 +198,9 @@ router.get('/:id', protect, async (req, res, next) => {
     const sessionResult = await pool.query(
       `SELECT 
          session_id, title, description, audio_format, file_size_bytes,
-         status, duration_secs, created_at, updated_at
+        participants, expected_speaker_count, language_locale, user_keywords,
+        auto_keywords, transcription_metadata,
+        status, duration_secs, error_message, created_at, updated_at
        FROM sessions
        WHERE session_id = $1 AND user_id = $2`,
       [id, req.user.userId]

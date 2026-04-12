@@ -7,12 +7,29 @@ import { authStore } from '../store/authStore';
 // DASHBOARD PAGE — Upload audio + view transcript
 // ================================================================
 
+const LANGUAGE_LOCALE_OPTIONS = [
+  { value: 'en-IN', label: 'English (India) — en-IN' },
+  { value: 'en-US', label: 'English (US) — en-US' },
+  { value: 'en-GB', label: 'English (UK) — en-GB' },
+  { value: 'hi-IN', label: 'Hindi (India) — hi-IN' },
+  { value: 'es-ES', label: 'Spanish (Spain) — es-ES' },
+  { value: 'fr-FR', label: 'French (France) — fr-FR' },
+  { value: 'de-DE', label: 'German (Germany) — de-DE' },
+  { value: 'pt-BR', label: 'Portuguese (Brazil) — pt-BR' },
+];
+
 export default function DashboardPage() {
   const [dragOver, setDragOver]     = useState(false);
   const [uploading, setUploading]   = useState(false);
   const [session, setSession]       = useState(null);
   const [transcript, setTranscript] = useState([]);
   const [uploadError, setUploadError] = useState('');
+  const [titleInput, setTitleInput] = useState('');
+  const [descriptionInput, setDescriptionInput] = useState('');
+  const [participantNamesInput, setParticipantNamesInput] = useState('');
+  const [expectedSpeakerCount, setExpectedSpeakerCount] = useState('2');
+  const [languageLocale, setLanguageLocale] = useState('en-IN');
+  const [userKeywordsInput, setUserKeywordsInput] = useState('');
 
   const pollRef     = useRef(null);
   const fileInputRef = useRef(null);
@@ -36,8 +53,44 @@ export default function DashboardPage() {
     navigate('/');
   };
 
+  const parseCommaSeparatedList = (value) => {
+    const tokens = value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    const seen = new Set();
+    return tokens.filter((token) => {
+      const key = token.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   const handleFile = async (file) => {
     if (!file) return;
+
+    const participantNames = parseCommaSeparatedList(participantNamesInput);
+    const userKeywords = parseCommaSeparatedList(userKeywordsInput);
+    const speakerCount = Number.parseInt(expectedSpeakerCount, 10);
+    const trimmedLocale = languageLocale.trim();
+
+    if (participantNames.length === 0) {
+      setUploadError('Add at least one participant name before upload.');
+      return;
+    }
+
+    if (!Number.isInteger(speakerCount) || speakerCount < 1 || speakerCount > 20) {
+      setUploadError('Expected speaker count must be a number between 1 and 20.');
+      return;
+    }
+
+    if (!trimmedLocale) {
+      setUploadError('Language locale is required (example: en-IN).');
+      return;
+    }
+
     setUploadError('');
     setSession(null);
     setTranscript([]);
@@ -46,6 +99,18 @@ export default function DashboardPage() {
     try {
       const form = new FormData();
       form.append('audio', file);
+      form.append('participant_names', JSON.stringify(participantNames));
+      form.append('expected_speaker_count', String(speakerCount));
+      form.append('language_locale', trimmedLocale);
+      form.append('user_keywords', JSON.stringify(userKeywords));
+
+      if (titleInput.trim()) {
+        form.append('title', titleInput.trim());
+      }
+
+      if (descriptionInput.trim()) {
+        form.append('description', descriptionInput.trim());
+      }
 
       const res = await api.post('/sessions/upload', form);
 
@@ -133,6 +198,90 @@ export default function DashboardPage() {
 
         {/* Upload zone */}
         <section className="upload-section">
+          <div className="upload-metadata-grid">
+            <div className="field">
+              <label htmlFor="meeting-title">Meeting Title (Optional)</label>
+              <input
+                id="meeting-title"
+                type="text"
+                value={titleInput}
+                onChange={(e) => setTitleInput(e.target.value)}
+                placeholder="Sprint planning"
+                disabled={uploading}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="meeting-description">Session Description (Optional)</label>
+              <input
+                id="meeting-description"
+                type="text"
+                value={descriptionInput}
+                onChange={(e) => setDescriptionInput(e.target.value)}
+                placeholder="Topics, context, agenda"
+                disabled={uploading}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="participant-names">Participant Names (Required)</label>
+              <input
+                id="participant-names"
+                type="text"
+                value={participantNamesInput}
+                onChange={(e) => setParticipantNamesInput(e.target.value)}
+                placeholder="Taminder, Monica, Arjun"
+                disabled={uploading}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="expected-speakers">Expected Speaker Count (Required)</label>
+              <input
+                id="expected-speakers"
+                type="number"
+                min="1"
+                max="20"
+                value={expectedSpeakerCount}
+                onChange={(e) => setExpectedSpeakerCount(e.target.value)}
+                disabled={uploading}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="language-locale">Language Locale (Required)</label>
+              <select
+                id="language-locale"
+                value={languageLocale}
+                onChange={(e) => setLanguageLocale(e.target.value)}
+                disabled={uploading}
+              >
+                {LANGUAGE_LOCALE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <label htmlFor="user-keywords">Keywords (Optional)</label>
+              <input
+                id="user-keywords"
+                type="text"
+                value={userKeywordsInput}
+                onChange={(e) => setUserKeywordsInput(e.target.value)}
+                placeholder="IRMS, Kubernetes, payroll"
+                disabled={uploading}
+              />
+            </div>
+          </div>
+
+          <p className="upload-meta-note">
+            Keywords are optional. The backend auto-generates a boosted keyword list using names,
+            session context, and historical transcripts.
+          </p>
+
           <div
             className={`upload-zone${dragOver ? ' drag-over' : ''}`}
             onDragOver={onDragOver}

@@ -73,7 +73,12 @@ CREATE TABLE sessions (
   audio_url       VARCHAR(500),                 -- stored filename (not full path)
   audio_format    VARCHAR(100),                 -- MIME type
   file_size_bytes INTEGER,
-  participants    JSONB,
+  participants    JSONB,                        -- required participant names
+  expected_speaker_count INTEGER,
+  language_locale VARCHAR(20) NOT NULL DEFAULT 'en-US',
+  user_keywords   JSONB,
+  auto_keywords   JSONB,
+  transcription_metadata JSONB,
   duration_secs   INTEGER,
   status          VARCHAR(20)  NOT NULL DEFAULT 'pending'
                                CHECK (status IN ('pending', 'processing', 'completed', 'failed')),

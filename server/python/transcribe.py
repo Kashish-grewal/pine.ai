@@ -228,7 +228,7 @@ def diarize(audio, result, hf_token, device, num_speakers=None):
     diarize_start = time.time()
 
     diarize_model = DiarizationPipeline(
-        use_auth_token=hf_token,
+        token=hf_token,
         device=device,
     )
 

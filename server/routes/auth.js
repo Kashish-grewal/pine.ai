@@ -44,7 +44,7 @@ const generateAccessToken = (userId, email) => {
   return jwt.sign(
     { userId, email },
     process.env.JWT_ACCESS_SECRET,
-    { expiresIn: '15m' }
+    { expiresIn: '7d' }  // Extended — frontend doesn't auto-refresh
   );
 };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { authStore } from '../store/authStore';
@@ -195,6 +195,9 @@ export default function DashboardPage() {
 
       {/* ── Main ── */}
       <main className="main-content">
+
+        {/* Voice Profiles */}
+        <VoiceProfiles />
 
         {/* Upload zone */}
         <section className="upload-section">
@@ -406,5 +409,290 @@ function StatusBadge({ status }) {
     <span className={`status-badge status-${status}`}>
       {labels[status] || status}
     </span>
+  );
+}
+
+// ── Voice Profiles ──────────────────────────────────────────────────
+
+function VoiceProfiles() {
+  const [profiles, setProfiles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [speakerName, setSpeakerName] = useState('');
+  const [recording, setRecording] = useState(false);
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [audioSource, setAudioSource] = useState(''); // 'recorded' or 'uploaded'
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const fetchProfiles = useCallback(async () => {
+    try {
+      const res = await api.get('/voice-profiles');
+      setProfiles(res.data.data.profiles || []);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchProfiles(); }, [fetchProfiles]);
+
+  // ── Recording ───────────────────────────────
+  const startRecording = async () => {
+    setError('');
+    setSuccessMsg('');
+    setAudioBlob(null);
+    setAudioSource('');
+    setRecordSeconds(0);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Pick a supported mimeType
+      let mimeType = 'audio/webm';
+      if (!MediaRecorder.isTypeSupported('audio/webm')) {
+        if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
+        else if (MediaRecorder.isTypeSupported('video/webm')) mimeType = 'video/webm';
+        else mimeType = ''; // let browser pick
+      }
+
+      const mrOptions = mimeType ? { mimeType } : {};
+      const mr = new MediaRecorder(stream, mrOptions);
+      chunksRef.current = [];
+
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mr.mimeType || 'audio/webm' });
+        setAudioBlob(blob);
+        setAudioSource('recorded');
+        stream.getTracks().forEach((t) => t.stop());
+        clearInterval(timerRef.current);
+      };
+
+      mediaRecorderRef.current = mr;
+      mr.start(1000); // collect data every 1s
+      setRecording(true);
+
+      timerRef.current = setInterval(() => {
+        setRecordSeconds((s) => {
+          if (s >= 14) {
+            if (mediaRecorderRef.current?.state === 'recording') {
+              mediaRecorderRef.current.stop();
+            }
+            setRecording(false);
+            return 15;
+          }
+          return s + 1;
+        });
+      }, 1000);
+    } catch (err) {
+      setError('Microphone access denied. Please allow microphone permission.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      setRecording(false);
+      clearInterval(timerRef.current);
+    }
+  };
+
+  // ── File upload ─────────────────────────────
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setError('');
+    setSuccessMsg('');
+    setAudioBlob(file);
+    setAudioSource('uploaded');
+    setRecordSeconds(0);
+  };
+
+  const clearAudio = () => {
+    setAudioBlob(null);
+    setAudioSource('');
+    setRecordSeconds(0);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // ── Save ────────────────────────────────────
+  const handleSave = async () => {
+    if (!speakerName.trim()) { setError('Enter the speaker\'s name.'); return; }
+    if (!audioBlob) { setError('Record or upload a voice sample first.'); return; }
+
+    setUploading(true);
+    setError('');
+    setSuccessMsg('');
+
+    try {
+      const form = new FormData();
+
+      // Determine filename and append
+      if (audioSource === 'uploaded' && audioBlob.name) {
+        form.append('voice', audioBlob, audioBlob.name);
+      } else {
+        const ext = (audioBlob.type || '').includes('mp4') ? '.mp4' : '.webm';
+        form.append('voice', audioBlob, `${speakerName.trim()}${ext}`);
+      }
+      form.append('speaker_name', speakerName.trim());
+
+      const res = await api.post('/voice-profiles', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000, // 2 min — embedding extraction takes time
+      });
+
+      setSuccessMsg(`Voice profile for "${speakerName.trim()}" saved!`);
+      setSpeakerName('');
+      clearAudio();
+      setShowForm(false);
+      fetchProfiles();
+    } catch (err) {
+      console.error('Voice profile upload error:', err);
+      const msg = err.response?.data?.message || err.message || 'Upload failed.';
+      setError(msg);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    try {
+      await api.delete(`/voice-profiles/${id}`);
+      setProfiles((prev) => prev.filter((p) => p.profile_id !== id));
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <section className="voice-profiles-section">
+      <div className="vp-header">
+        <div>
+          <h3 className="vp-title">🎤 Voice Profiles</h3>
+          <p className="vp-subtitle">
+            Record or upload a 10–15 second voice sample per participant to
+            automatically identify who's speaking in your meetings.
+          </p>
+        </div>
+        <button
+          className="btn-add-profile"
+          onClick={() => { setShowForm(!showForm); setError(''); setSuccessMsg(''); }}
+        >
+          {showForm ? '✕ Cancel' : '+ Add Voice'}
+        </button>
+      </div>
+
+      {/* Existing profiles */}
+      {!loading && profiles.length > 0 && (
+        <div className="vp-list">
+          {profiles.map((p) => (
+            <div key={p.profile_id} className="vp-card">
+              <div className="vp-card-info">
+                <span className="vp-card-name">{p.speaker_name}</span>
+                <span className="vp-card-meta">
+                  {p.duration_secs ? `${Number(p.duration_secs).toFixed(0)}s` : '—'} • enrolled
+                </span>
+              </div>
+              <button className="vp-card-delete" onClick={() => handleDelete(p.profile_id)} title="Delete profile">
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!loading && profiles.length === 0 && !showForm && (
+        <p className="vp-empty">No voice profiles yet. Add one to improve speaker identification.</p>
+      )}
+
+      {successMsg && <p style={{ fontSize: 13, color: '#8eb68e', marginTop: 8 }}>{successMsg}</p>}
+
+      {/* Add profile form */}
+      {showForm && (
+        <div className="vp-form">
+          <div className="field">
+            <label htmlFor="vp-speaker-name">Speaker Name</label>
+            <input
+              id="vp-speaker-name"
+              type="text"
+              value={speakerName}
+              onChange={(e) => setSpeakerName(e.target.value)}
+              placeholder="e.g. Kashish"
+              disabled={uploading}
+            />
+          </div>
+
+          {/* Audio source - record OR upload */}
+          {!audioBlob && !recording && (
+            <div className="vp-audio-options">
+              <button className="btn-record" onClick={startRecording} disabled={uploading}>
+                <span className="record-dot" /> Record Voice
+              </button>
+              <span className="vp-or">or</span>
+              <button
+                className="btn-upload-voice"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+              >
+                📁 Upload Audio File
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*,.mp3,.wav,.m4a,.webm,.ogg"
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+              />
+            </div>
+          )}
+
+          {/* Recording in progress */}
+          {recording && (
+            <div className="vp-recording-active">
+              <div className="recording-pulse" />
+              <span className="recording-timer">{recordSeconds}s / 15s</span>
+              <button className="btn-stop-record" onClick={stopRecording}>
+                ■ Stop
+              </button>
+            </div>
+          )}
+
+          {/* Audio ready */}
+          {audioBlob && !recording && (
+            <div className="vp-recorded">
+              <span className="vp-recorded-badge">
+                {audioSource === 'recorded'
+                  ? `✓ Recorded (${recordSeconds}s)`
+                  : `✓ File: ${audioBlob.name || 'audio'}`}
+              </span>
+              <button className="btn-re-record" onClick={clearAudio}>
+                Change
+              </button>
+            </div>
+          )}
+
+          <p className="vp-tip">
+            💡 Speak naturally for 10-15 seconds — say your name and something you typically discuss in meetings.
+          </p>
+
+          {error && <p className="error-text">{error}</p>}
+
+          <button
+            className="btn-save-profile"
+            onClick={handleSave}
+            disabled={uploading || !speakerName.trim() || !audioBlob}
+          >
+            {uploading ? 'Extracting voiceprint…' : 'Save Voice Profile'}
+          </button>
+        </div>
+      )}
+    </section>
   );
 }

@@ -253,6 +253,144 @@ def diarize(audio, result, hf_token, device, num_speakers=None):
     return result, num_detected
 
 
+def match_speakers_to_profiles(result, voice_profiles_path, hf_token, device):
+    """
+    Match diarized speakers to known voice profiles using cosine similarity.
+    
+    voice_profiles_path: JSON file with [{"name": "John", "embedding": [...]}, ...]
+    
+    For each unique SPEAKER_XX, we extract an embedding from their segments
+    and compare against known profiles. If similarity > threshold, we rename.
+    """
+    if not voice_profiles_path or not os.path.isfile(voice_profiles_path):
+        return result
+    
+    import numpy as np
+    
+    try:
+        with open(voice_profiles_path, "r") as f:
+            profiles = json.load(f)
+    except Exception as e:
+        log(f"Could not load voice profiles: {e}")
+        return result
+    
+    if not profiles:
+        return result
+    
+    log(f"Matching speakers against {len(profiles)} voice profiles...")
+    
+    # Collect unique speaker labels
+    speaker_labels = set()
+    for seg in result.get("segments", []):
+        if "speaker" in seg:
+            speaker_labels.add(seg["speaker"])
+    
+    if not speaker_labels:
+        return result
+    
+    # For each speaker, find their segments and try to extract embedding
+    # from the diarization model's internal embeddings
+    # Since we can't easily re-extract embeddings per speaker from the 
+    # diarization output, we use a simpler approach:
+    # Compare the time-weighted centroid of each speaker's activity
+    # against the profiles using the profile embeddings directly.
+    
+    # Build a speaker-to-name mapping using cosine similarity
+    def cosine_similarity(a, b):
+        a = np.array(a)
+        b = np.array(b)
+        dot = np.dot(a, b)
+        norm_a = np.linalg.norm(a)
+        norm_b = np.linalg.norm(b)
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+    
+    # Try to extract per-speaker embeddings from audio
+    try:
+        from pyannote.audio import Inference
+        import torch
+        
+        inference = Inference(
+            "pyannote/embedding",
+            window="whole",
+            device=device,
+            use_auth_token=hf_token if hf_token else None,
+        )
+        
+        # Load the full audio
+        import whisperx
+        audio_data = result.get("_audio_data", None)
+        
+        if audio_data is not None:
+            # Extract embedding for each speaker by their segments
+            speaker_embeddings = {}
+            
+            for speaker in speaker_labels:
+                # Get all segments for this speaker
+                segs = [s for s in result.get("segments", []) if s.get("speaker") == speaker]
+                if not segs:
+                    continue
+                
+                # Use the longest segment for this speaker's embedding
+                longest = max(segs, key=lambda s: s.get("end", 0) - s.get("start", 0))
+                start_sample = int(longest.get("start", 0) * 16000)
+                end_sample = int(longest.get("end", 0) * 16000)
+                
+                if end_sample <= start_sample or end_sample > len(audio_data):
+                    continue
+                
+                segment_audio = audio_data[start_sample:end_sample]
+                waveform = torch.tensor(segment_audio).unsqueeze(0).float()
+                
+                try:
+                    emb = inference({"waveform": waveform, "sample_rate": 16000})
+                    if hasattr(emb, 'numpy'):
+                        speaker_embeddings[speaker] = emb.numpy().flatten().tolist()
+                    else:
+                        speaker_embeddings[speaker] = list(emb.flatten())
+                except Exception:
+                    continue
+            
+            # Match speakers to profiles
+            THRESHOLD = 0.65  # Cosine similarity threshold
+            speaker_name_map = {}
+            used_profiles = set()
+            
+            # Score all speaker-profile pairs
+            scores = []
+            for speaker, emb in speaker_embeddings.items():
+                for i, profile in enumerate(profiles):
+                    sim = cosine_similarity(emb, profile["embedding"])
+                    scores.append((sim, speaker, i, profile["name"]))
+            
+            # Sort by similarity (highest first) and assign greedily
+            scores.sort(reverse=True)
+            for sim, speaker, profile_idx, name in scores:
+                if speaker in speaker_name_map or profile_idx in used_profiles:
+                    continue
+                if sim >= THRESHOLD:
+                    speaker_name_map[speaker] = name
+                    used_profiles.add(profile_idx)
+                    log(f"  {speaker} → {name} (similarity: {sim:.3f})")
+            
+            # Apply mapping to segments
+            if speaker_name_map:
+                for seg in result.get("segments", []):
+                    old_speaker = seg.get("speaker", "")
+                    if old_speaker in speaker_name_map:
+                        seg["speaker"] = speaker_name_map[old_speaker]
+                
+                log(f"Matched {len(speaker_name_map)}/{len(speaker_labels)} speakers to profiles")
+            else:
+                log("No speakers matched any profile (below threshold)")
+    
+    except Exception as e:
+        log(f"Speaker matching failed (non-fatal): {e}")
+    
+    return result
+
+
 def merge_short_segments(segments, min_gap=0.5, min_duration=0.3):
     """
     Merge very short segments from the same speaker that are close together.
@@ -337,6 +475,7 @@ def main():
     parser.add_argument("--device", default="auto", help="Compute device: mps, cuda, cpu, auto")
     parser.add_argument("--model", default="large-v3", help="Whisper model size")
     parser.add_argument("--no-diarize", action="store_true", help="Skip speaker diarization")
+    parser.add_argument("--voice-profiles", default=None, help="Path to JSON file with voice profile embeddings")
 
     args = parser.parse_args()
 
@@ -397,6 +536,14 @@ def main():
         else:
             for seg in result.get("segments", []):
                 seg["speaker"] = "SPEAKER_00"
+
+        # Step 4b: Match speakers to voice profiles
+        if args.voice_profiles and not args.no_diarize:
+            result["_audio_data"] = whisperx.load_audio(preprocessed_path)
+            result = match_speakers_to_profiles(
+                result, args.voice_profiles, hf_token, device
+            )
+            result.pop("_audio_data", None)  # Clean up
 
     # Step 5: Build output
     output = build_output(result, duration, num_speakers)

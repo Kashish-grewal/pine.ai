@@ -1,4 +1,6 @@
 const fs   = require('fs');
+const os   = require('os');
+const path = require('path');
 
 // ── Simple sequential job queue ─────────────────────────────────────
 // WhisperX loads a ~3GB model into GPU memory. Running multiple
@@ -77,6 +79,7 @@ const buildTranscriptionOptions = (metadata) => ({
   languageLocale: metadata.languageLocale,
   participantNames: metadata.participantNames,
   keywordBoostList: metadata.keywordBoostList,
+  voiceProfilesPath: metadata.voiceProfilesPath || null,
 });
 
 const transcribeWithRetries = async (filePath, options, phaseLabel) => {
@@ -183,6 +186,27 @@ const processSession = async (sessionId, filePath) => {
     );
 
     const transcriptionOptions = buildTranscriptionOptions(transcriptionMetadata);
+
+    // ── Step 2b — Fetch voice profiles for this user ─────────────────
+    let voiceProfilesPath = null;
+    try {
+      const vpResult = await pool.query(
+        'SELECT speaker_name, embedding FROM voice_profiles WHERE user_id = $1',
+        [sessionRow.user_id]
+      );
+      if (vpResult.rows.length > 0) {
+        const profiles = vpResult.rows.map((r) => ({
+          name: r.speaker_name,
+          embedding: typeof r.embedding === 'string' ? JSON.parse(r.embedding) : r.embedding,
+        }));
+        voiceProfilesPath = path.join(os.tmpdir(), `pine_profiles_${sessionId}.json`);
+        fs.writeFileSync(voiceProfilesPath, JSON.stringify(profiles));
+        transcriptionOptions.voiceProfilesPath = voiceProfilesPath;
+        console.log(`[Pipeline] Loaded ${profiles.length} voice profiles for speaker matching`);
+      }
+    } catch (vpErr) {
+      console.warn(`[Pipeline] Could not load voice profiles: ${vpErr.message}`);
+    }
 
     // ── Step 3 — Transcribe audio with WhisperX (or Groq fallback) ──
     console.log(`[Pipeline] Starting transcription...`);

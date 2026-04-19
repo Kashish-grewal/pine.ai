@@ -204,3 +204,26 @@ CREATE TABLE email_logs (
 
 CREATE INDEX idx_email_logs_session ON email_logs (session_id);
 CREATE INDEX idx_email_logs_status  ON email_logs (status);
+
+
+-- ================================================================
+-- VOICE PROFILES (speaker enrollment for diarization)
+-- ================================================================
+-- Users record a 10-15s voice sample per participant.
+-- Pyannote extracts a 512-dim speaker embedding (voiceprint).
+-- During transcription, embeddings are compared to map
+-- SPEAKER_XX → actual participant names automatically.
+-- ================================================================
+CREATE TABLE voice_profiles (
+  profile_id    UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID         NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  speaker_name  VARCHAR(255) NOT NULL,
+  audio_path    VARCHAR(500),
+  embedding     JSONB        NOT NULL,     -- 512-dim float array
+  duration_secs DECIMAL(5,2),
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, speaker_name)
+);
+
+CREATE INDEX idx_voice_profiles_user ON voice_profiles (user_id);

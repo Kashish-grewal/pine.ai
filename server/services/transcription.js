@@ -211,7 +211,7 @@ const transcribeWithWhisperX = (filePath, options = {}) => {
 // ----------------------------------------------------------------
 const addDiarization = (filePath, groqSegments, options = {}) => {
   return new Promise((resolve, reject) => {
-    const { expectedSpeakerCount } = options;
+    const { expectedSpeakerCount, voiceProfilesPath } = options;
     const hfToken = process.env.HF_TOKEN || '';
 
     if (!hfToken || !isWhisperXAvailable()) {
@@ -233,6 +233,12 @@ const addDiarization = (filePath, groqSegments, options = {}) => {
 
     if (expectedSpeakerCount && expectedSpeakerCount > 0) {
       args.push('--speakers', String(expectedSpeakerCount));
+    }
+
+    // Pass voice profiles for speaker name matching
+    if (voiceProfilesPath) {
+      args.push('--voice-profiles', voiceProfilesPath);
+      console.log('[Transcription] Voice profiles will be used for speaker identification');
     }
 
     const startTime = Date.now();

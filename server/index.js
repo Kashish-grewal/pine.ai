@@ -89,9 +89,11 @@ const authLimiter = rateLimit({
 // ---------------------------------------------------------------------------
 const authRoutes = require('./routes/auth');
 const sessionRoutes = require('./routes/sessions');
+const voiceProfileRoutes = require('./routes/voiceProfiles');
 
 app.use('/api/v1/auth', authLimiter, authRoutes);
 app.use('/api/v1/sessions', sessionRoutes);
+app.use('/api/v1/voice-profiles', voiceProfileRoutes);
 
 // ---------------------------------------------------------------------------
 // API root

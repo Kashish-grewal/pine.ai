@@ -232,10 +232,15 @@ export default function DashboardPage() {
                 style={{ fontSize: 14, background: '#1a1a3e', border: '1px solid #2a2a5e' }}
                 onClick={async () => {
                   setTokenLoading(true);
+                  setTokenCopied(false);
+                  let token = authStore.getToken() || '';
                   try {
                     const res = await api.get('/auth/extension-token');
-                    setExtensionToken(res.data.data.token);
-                  } catch { setExtensionToken(''); }
+                    if (res.data?.data?.token) token = res.data.data.token;
+                  } catch (err) {
+                    console.log('[Extension] API token fetch failed, using localStorage token:', err.message);
+                  }
+                  setExtensionToken(token);
                   setTokenLoading(false);
                   setShowExtensionModal(true);
                 }}

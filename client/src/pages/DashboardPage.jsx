@@ -1126,28 +1126,33 @@ function SpeakerLabel({ label, participants, onRename }) {
   );
 }
 
-// ── MermaidRenderer — uses locally installed mermaid package ─────
+// ── MermaidRenderer — optimized with zoom controls ──────────────
 function MermaidRenderer({ code }) {
   const containerRef = useRef(null);
   const [status, setStatus] = useState('loading');
+  const [zoom, setZoom] = useState(100);
 
   useEffect(() => {
     if (!code) return;
     setStatus('loading');
+    setZoom(100);
     let cancelled = false;
 
-    const cleanCode = code
+    let cleanCode = code
       .replace(/```mermaid\n?/gi, '')
       .replace(/```\n?/g, '')
       .trim();
 
+    // Switch TD to LR for compact horizontal layout
+    cleanCode = cleanCode.replace(/^(graph|flowchart)\s+TD/i, '$1 LR');
+
     const render = async () => {
       try {
-        // Always re-initialize so classDef colors (pink/yellow/sky-blue) are never overridden
         mermaid.initialize({
           startOnLoad: false,
           theme: 'base',
           securityLevel: 'loose',
+          flowchart: { nodeSpacing: 25, rankSpacing: 35, curve: 'basis', padding: 10 },
           themeVariables: {
             background:           '#1a1a2e',
             primaryColor:         '#FF69B4',
@@ -1162,7 +1167,7 @@ function MermaidRenderer({ code }) {
             tertiaryBorderColor:  '#0047AB',
             edgeLabelBackground:  '#2a2a4e',
             fontFamily:           'Inter, system-ui, sans-serif',
-            fontSize:             '14px',
+            fontSize:             '12px',
           },
         });
 
@@ -1175,8 +1180,8 @@ function MermaidRenderer({ code }) {
           containerRef.current.innerHTML = svg;
           const svgEl = containerRef.current.querySelector('svg');
           if (svgEl) {
-            svgEl.style.maxWidth = '100%';
-            svgEl.style.height   = 'auto';
+            svgEl.style.maxWidth = 'none';
+            svgEl.style.height = 'auto';
           }
           setStatus('rendered');
         }
@@ -1194,18 +1199,16 @@ function MermaidRenderer({ code }) {
 
   return (
     <>
-      {/* Spinner — shown while mermaid.render() is working */}
       {status === 'loading' && (
         <div style={{ padding: 24, textAlign: 'center', color: '#7a7a7a', fontSize: 13 }}>
           <div className="spinner" style={{ margin: '0 auto 12px' }} />
-          Rendering diagram…
+          Rendering diagram...
         </div>
       )}
 
-      {/* Error fallback */}
       {status === 'error' && (
         <div style={{ padding: 16 }}>
-          <p style={{ color: '#f59e0b', fontSize: 12, marginBottom: 8 }}>⚠ Diagram couldn’t render. Raw flowchart:</p>
+          <p style={{ color: '#f59e0b', fontSize: 12, marginBottom: 8 }}>Diagram could not render. Raw flowchart:</p>
           <pre style={{
             color: '#ececec', fontSize: 12, whiteSpace: 'pre-wrap',
             padding: 16, background: '#111', borderRadius: 6,
@@ -1217,15 +1220,32 @@ function MermaidRenderer({ code }) {
         </div>
       )}
 
-      {/*
-        Always mounted so containerRef.current is never null.
-        mermaid.render() returns SVG which gets injected here once ready.
-        Hidden until render completes.
-      */}
+      {status === 'rendered' && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px',
+          borderBottom: '1px solid #1e1e2e', background: '#0a0a15', borderRadius: '8px 8px 0 0',
+        }}>
+          <button onClick={() => setZoom(100)} style={{
+            background: '#1e1e2e', border: '1px solid #2a2a3e', borderRadius: 4,
+            color: '#9ca3af', fontSize: 11, padding: '2px 8px', cursor: 'pointer',
+          }}>Fit</button>
+          <button onClick={() => setZoom(z => Math.max(30, z - 15))} style={{ background:'none', border:'none', color:'#9ca3af', cursor:'pointer', fontSize:15 }}>-</button>
+          <input type="range" min={30} max={200} value={zoom} onChange={e => setZoom(Number(e.target.value))} style={{ width: 90, accentColor: '#4a90e2' }} />
+          <button onClick={() => setZoom(z => Math.min(200, z + 15))} style={{ background:'none', border:'none', color:'#9ca3af', cursor:'pointer', fontSize:15 }}>+</button>
+          <span style={{ fontSize: 11, color: '#6b7280', minWidth: 32 }}>{zoom}%</span>
+        </div>
+      )}
+
       <div
         ref={containerRef}
         className="mermaid-container"
-        style={{ padding: 16, overflow: 'auto', display: status === 'rendered' ? 'block' : 'none' }}
+        style={{
+          padding: 16, overflow: 'auto',
+          display: status === 'rendered' ? 'block' : 'none',
+          transform: `scale(${zoom / 100})`,
+          transformOrigin: 'top left',
+          transition: 'transform 0.15s ease',
+        }}
       />
     </>
   );

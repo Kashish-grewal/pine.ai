@@ -162,7 +162,7 @@ OUTPUT RULES — follow exactly:
    {{text}}  :::task       — action items from the TASKS list above
 5. Connect with -->  e.g.  S --> T1 --> D0 --> A1
 6. Use actual meeting content for every label (decisions, task descriptions, topics)
-7. Max 35 chars per label
+7. Max 25 chars per label
 8. Return ONLY the Mermaid code. No markdown fences. No explanation.
 
 Example output structure (use YOUR meeting content, not these placeholders):

@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://pine-ai-backend.onrender.com/api/:path*" }
+    { "source": "/api/:path*", "destination": "https://pine-ai-m3st.onrender.com/api/:path*" }
   ]
 }

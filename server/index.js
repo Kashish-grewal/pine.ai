@@ -61,6 +61,11 @@ const corsOptions = {
       return cb(null, true);
     }
 
+    // Allow Vercel preview/production deployments
+    if (/\.vercel\.app$/.test(origin)) {
+      return cb(null, true);
+    }
+
     return cb(new Error(`CORS blocked for origin: ${origin}`));
   },
   credentials: true,

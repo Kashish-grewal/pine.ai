@@ -1,7 +1,11 @@
 const { Resend } = require('resend');
 const { pool } = require('../db/db');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
+
+if (!resend) console.warn('[Email] RESEND_API_KEY not set — email sending disabled');
 
 // ================================================================
 // EMAIL SERVICE — Send meeting summaries with calendar invites
@@ -320,6 +324,10 @@ const sendSummaryEmail = async (options) => {
 
   if (!toEmail) {
     throw new Error('toEmail is required');
+  }
+
+  if (!resend) {
+    throw new Error('Email sending is disabled — RESEND_API_KEY not configured');
   }
 
   const htmlContent = formatSummaryEmail(summary, tasks, transactions, sessionData);

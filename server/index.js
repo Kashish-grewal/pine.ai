@@ -56,6 +56,11 @@ const corsOptions = {
       return cb(null, true);
     }
 
+    // Allow Chrome extension origins
+    if (/^chrome-extension:\/\//.test(origin)) {
+      return cb(null, true);
+    }
+
     return cb(new Error(`CORS blocked for origin: ${origin}`));
   },
   credentials: true,

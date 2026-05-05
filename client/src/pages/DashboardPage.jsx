@@ -57,6 +57,7 @@ export default function DashboardPage() {
   const [tokenLoading, setTokenLoading] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(null); // session_id to confirm
+  const [toast, setToast] = useState(null); // { message, type: 'success'|'error' }
   const mermaidRef = useRef(null);
 
   const pollRef      = useRef(null);
@@ -180,12 +181,17 @@ export default function DashboardPage() {
     } finally { setUploading(false); }
   };
 
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
+
   const handleReprocess = async () => {
     if (!activeSessionId) return;
     try {
       await api.post(`/sessions/${activeSessionId}/reprocess`);
-      alert('Re-processing started — results update in ~30 seconds.');
-    } catch (e) { alert('Failed: ' + (e.response?.data?.message || e.message)); }
+      showToast('Re-processing started — results update in ~30 seconds.');
+    } catch (e) { showToast('Failed: ' + (e.response?.data?.message || e.message), 'error'); }
   };
 
   const toggleTask = async (taskId, current) => {
@@ -270,6 +276,21 @@ export default function DashboardPage() {
 
   return (
     <div className="app-shell">
+      {/* Toast notification */}
+      {toast && (
+        <div style={{
+          position: 'fixed', top: 20, right: 20, zIndex: 9999,
+          background: toast.type === 'error' ? '#7f1d1d' : '#14532d',
+          border: `1px solid ${toast.type === 'error' ? '#ef4444' : '#22c55e'}`,
+          color: toast.type === 'error' ? '#fca5a5' : '#bbf7d0',
+          padding: '10px 18px', borderRadius: 10,
+          fontSize: 13, fontWeight: 500, maxWidth: 340,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          animation: 'slideIn 0.3s ease-out',
+        }}>
+          {toast.type === 'error' ? '❌' : '✅'} {toast.message}
+        </div>
+      )}
       {/* ── Sidebar ───────────────────────────────────────────────── */}
       <aside className="sidebar">
           <div className="sidebar-header">
@@ -488,6 +509,50 @@ export default function DashboardPage() {
             {/* Completed state */}
             {session.status === 'completed' && (
               <>
+                {/* Stats overview */}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                  gap: 10, marginBottom: 16,
+                }}>
+                  {[
+                    {
+                      icon: '✅', label: 'Tasks',
+                      value: tasks?.length ? `${tasks.filter(t => t.is_completed).length}/${tasks.length}` : '0',
+                      sub: tasks?.length ? `${Math.round(tasks.filter(t => t.is_completed).length / tasks.length * 100)}% done` : 'none',
+                      color: '#4ade80',
+                    },
+                    {
+                      icon: '👥', label: 'Speakers',
+                      value: transcript ? new Set(transcript.map(t => t.speaker_label)).size : 0,
+                      sub: 'detected',
+                      color: '#818cf8',
+                    },
+                    {
+                      icon: '⏱', label: 'Duration',
+                      value: session.duration_secs ? `${Math.floor(session.duration_secs / 60)}m` : '—',
+                      sub: session.duration_secs ? `${session.duration_secs % 60}s` : '',
+                      color: '#60a5fa',
+                    },
+                    {
+                      icon: '💡', label: 'Decisions',
+                      value: summary?.key_decisions?.length || 0,
+                      sub: 'captured',
+                      color: '#fbbf24',
+                    },
+                  ].map(card => (
+                    <div key={card.label} style={{
+                      background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10,
+                      padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10,
+                    }}>
+                      <span style={{ fontSize: 22 }}>{card.icon}</span>
+                      <div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: card.color, lineHeight: 1 }}>{card.value}</div>
+                        <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>{card.label} · {card.sub}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
                 {/* Summary banner */}
                 {summary && (
                   <div className="summary-banner" style={{ borderLeft:`3px solid ${sentimentColor[summary.sentiment] || '#94a3b8'}` }}>
@@ -607,7 +672,7 @@ export default function DashboardPage() {
                                     s.speaker_label === oldLabel ? { ...s, speaker_label: newLabel } : s
                                   ),
                                 }));
-                              } catch (e) { alert('Rename failed: ' + (e.response?.data?.message || e.message)); }
+                              } catch (e) { showToast('Rename failed: ' + (e.response?.data?.message || e.message), 'error'); }
                             }}
                           />
                           <span className="seg-time">{formatTime(seg.start_time)} — {formatTime(seg.end_time)}</span>

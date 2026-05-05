@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { GoogleLogin } from '@react-oauth/google';
 import api from '../api/client';
 import { authStore } from '../store/authStore';
 
 // ================================================================
-// AUTH PAGE — Login & Register
+// AUTH PAGE — Login, Register, & Google Sign-In
 // ================================================================
 
 export default function AuthPage() {
@@ -46,6 +47,31 @@ export default function AuthPage() {
     }
   };
 
+  // ── Google OAuth handler ─────────────────────────────────────────
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setError('');
+    setLoading(true);
+    try {
+      const res = await api.post('/auth/google', {
+        credential: credentialResponse.credential,
+      });
+      authStore.set(res.data.data.accessToken, res.data.data.user);
+      navigate('/dashboard');
+    } catch (err) {
+      if (!err.response) {
+        setError('Cannot connect to server.');
+      } else {
+        setError(err.response.data?.message || 'Google sign-in failed.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleError = () => {
+    setError('Google sign-in was cancelled or failed. Please try again.');
+  };
+
   const toggleMode = () => {
     setMode((m) => (m === 'login' ? 'register' : 'login'));
     setError('');
@@ -63,6 +89,27 @@ export default function AuthPage() {
         </div>
 
         <div className="auth-divider" />
+
+        {/* Google Sign-In — only shown when Client ID is configured */}
+        {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+          <>
+            <div className="google-signin-wrap">
+              <GoogleLogin
+                onSuccess={handleGoogleSuccess}
+                onError={handleGoogleError}
+                theme="filled_black"
+                size="large"
+                text={mode === 'login' ? 'signin_with' : 'signup_with'}
+                shape="rectangular"
+              />
+            </div>
+
+            {/* OR divider */}
+            <div className="auth-or-divider">
+              <span>or</span>
+            </div>
+          </>
+        )}
 
         {/* Form */}
         <form className="auth-form" onSubmit={handleSubmit} noValidate>

@@ -30,10 +30,10 @@ const authLimiter = rateLimit({
 // TOKEN HELPERS
 // Two tokens are issued on every login:
 //
-// ACCESS TOKEN (15 min)
-//   - Short-lived. Sent with every API request.
-//   - If stolen, it expires quickly.
-//   - Stored only in memory on the frontend (never localStorage).
+// ACCESS TOKEN (7 days — extended for MVP)
+//   - In production, reduce to 15 min and enable silent refresh.
+//   - Stored in localStorage on the frontend for simplicity.
+//   - For production security, move to memory + httpOnly refresh cookies.
 //
 // REFRESH TOKEN (7 days)
 //   - Long-lived. Sent only to POST /refresh.
@@ -344,6 +344,132 @@ router.get('/me', protect, async (req, res, next) => {
           auth_provider: user.auth_provider,
           member_since: user.created_at,
         },
+      },
+    });
+
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ================================================================
+// POST /api/v1/auth/google
+// Google OAuth — verify ID token from Google Sign-In
+// ================================================================
+router.post('/google', async (req, res, next) => {
+  try {
+    const { idToken, credential } = req.body;
+    const token = idToken || credential;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Google ID token (idToken or credential) is required.',
+      });
+    }
+
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      return res.status(500).json({
+        success: false,
+        message: 'Google OAuth is not configured on this server.',
+      });
+    }
+
+    // Verify the Google ID token
+    const { OAuth2Client } = require('google-auth-library');
+    const googleClient = new OAuth2Client(clientId);
+
+    let ticket;
+    try {
+      ticket = await googleClient.verifyIdToken({
+        idToken: token,
+        audience: clientId,
+      });
+    } catch (verifyErr) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid Google token. Please try signing in again.',
+      });
+    }
+
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Google account has no email address.',
+      });
+    }
+
+    // Find or create user
+    let userResult = await query(
+      'SELECT user_id, email, full_name, avatar_url, auth_provider FROM users WHERE google_id = $1',
+      [googleId]
+    );
+
+    let user;
+
+    if (userResult.rows.length > 0) {
+      // Existing Google user — update profile info
+      user = userResult.rows[0];
+      await query(
+        `UPDATE users SET full_name = COALESCE($1, full_name),
+                          avatar_url = COALESCE($2, avatar_url),
+                          updated_at = NOW()
+         WHERE user_id = $3`,
+        [name, picture, user.user_id]
+      );
+      user.full_name = name || user.full_name;
+      user.avatar_url = picture || user.avatar_url;
+    } else {
+      // Check if email exists with local auth
+      const emailResult = await query(
+        'SELECT user_id, email, full_name, auth_provider FROM users WHERE email = $1',
+        [email]
+      );
+
+      if (emailResult.rows.length > 0) {
+        // Link Google to existing local account
+        user = emailResult.rows[0];
+        await query(
+          `UPDATE users SET google_id = $1,
+                            avatar_url = COALESCE($2, avatar_url),
+                            auth_provider = 'google',
+                            updated_at = NOW()
+           WHERE user_id = $3`,
+          [googleId, picture, user.user_id]
+        );
+      } else {
+        // Create new user
+        const createResult = await query(
+          `INSERT INTO users (email, full_name, avatar_url, google_id, auth_provider)
+           VALUES ($1, $2, $3, $4, 'google')
+           RETURNING user_id, email, full_name, avatar_url`,
+          [email, name || email.split('@')[0], picture || null, googleId]
+        );
+        user = createResult.rows[0];
+      }
+    }
+
+    // Issue tokens (same as local login)
+    const accessToken = generateAccessToken(user.user_id, user.email || email);
+    const { token: refreshToken, hash: refreshHash } = generateRefreshToken(user.user_id);
+    await storeRefreshToken(user.user_id, refreshHash);
+
+    res.json({
+      success: true,
+      message: 'Logged in with Google.',
+      data: {
+        user: {
+          id: user.user_id,
+          email: user.email || email,
+          full_name: user.full_name || name,
+          avatar_url: user.avatar_url || picture,
+        },
+        accessToken,
+        refreshToken,
       },
     });
 

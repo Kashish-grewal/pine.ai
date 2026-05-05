@@ -1,3 +1,14 @@
+// ================================================================
+// CRASH PROTECTION — Handle EPIPE and other unhandled errors
+// ================================================================
+process.on('uncaughtException', (err) => {
+  if (err.code === 'EPIPE') {
+    console.warn('[Server] EPIPE error ignored (broken pipe)');
+    return;
+  }
+  console.error('[Server] Uncaught exception:', err);
+});
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -90,10 +101,16 @@ const authLimiter = rateLimit({
 const authRoutes = require('./routes/auth');
 const sessionRoutes = require('./routes/sessions');
 const voiceProfileRoutes = require('./routes/voiceProfiles');
+const taskRoutes = require('./routes/tasks');
+const emailRoutes = require('./routes/email');
+const workflowRoutes = require('./routes/workflow');
 
 app.use('/api/v1/auth', authLimiter, authRoutes);
 app.use('/api/v1/sessions', sessionRoutes);
 app.use('/api/v1/voice-profiles', voiceProfileRoutes);
+app.use('/api/v1/tasks', taskRoutes);
+app.use('/api/v1/email', emailRoutes);
+app.use('/api/v1/workflow', workflowRoutes);
 
 // ---------------------------------------------------------------------------
 // API root

@@ -14,7 +14,7 @@ const axios = require('axios');
 // Both Groq and Gemini have generous free tiers.
 // ================================================================
 
-const MAX_SEGMENT_BATCH = 15; // Smaller batches to stay within Groq free rate limits
+const MAX_SEGMENT_BATCH = 10; // Smaller batches to stay within Groq free rate limits
 const MAX_RETRIES = 2;
 
 // ----------------------------------------------------------------
@@ -228,7 +228,7 @@ const correctTranscript = async (segments, context = {}) => {
 
     // Small delay between batches to respect rate limits
     if (i + MAX_SEGMENT_BATCH < segments.length) {
-      await new Promise((r) => setTimeout(r, 3000)); // 3s delay to respect Groq rate limits (30 req/min)
+      await new Promise((r) => setTimeout(r, 8000)); // 3s delay to respect Groq rate limits (30 req/min)
     }
   }
 

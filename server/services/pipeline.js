@@ -1,7 +1,7 @@
 const fs   = require('fs');
 const os   = require('os');
 const path = require('path');
-
+const { structureSession } = require('./structuring');
 // ── Simple sequential job queue ─────────────────────────────────────
 // WhisperX loads a ~3GB model into GPU memory. Running multiple
 // transcriptions simultaneously will crash or stall the machine.
@@ -18,6 +18,17 @@ const enqueueSession = (sessionId, filePath) => {
   });
 };
 
+// ── Pipeline timeout — kills stuck sessions after 30 min ────────────
+const PIPELINE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+const withTimeout = (promise, ms, sessionId) => {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Pipeline timeout: session ${sessionId} exceeded ${ms / 60000} minutes`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
+
 const processQueue = async () => {
   if (isProcessing || jobQueue.length === 0) return;
   isProcessing = true;
@@ -26,7 +37,7 @@ const processQueue = async () => {
   console.log(`[Queue] Starting session ${sessionId} (${jobQueue.length} remaining in queue)`);
 
   try {
-    await processSession(sessionId, filePath);
+    await withTimeout(processSession(sessionId, filePath), PIPELINE_TIMEOUT_MS, sessionId);
     resolve();
   } catch (err) {
     reject(err);
@@ -40,7 +51,6 @@ const processQueue = async () => {
 };
 const { pool }           = require('../db/db');
 const { transcribeAudio } = require('./transcription');
-const { correctTranscript } = require('./llmCorrection');
 const {
   buildTranscriptionMetadata,
   extractFrequentTermsFromTexts,
@@ -161,9 +171,16 @@ const processSession = async (sessionId, filePath) => {
       { maxItems: 60 }
     );
 
+    const participants = Array.isArray(sessionRow.participants) ? sessionRow.participants : [];
+    // If user didn't specify expected_speaker_count, default to participant count.
+    // This prevents pyannote from over-detecting speakers (e.g. finding 5 when there are 2).
+    const expectedSpeakerCount =
+      sessionRow.expected_speaker_count ||
+      (participants.length > 0 ? participants.length : null);
+
     const transcriptionMetadata = buildTranscriptionMetadata({
-      participantNames: sessionRow.participants,
-      expectedSpeakerCount: sessionRow.expected_speaker_count,
+      participantNames: participants,
+      expectedSpeakerCount,
       languageLocale: sessionRow.language_locale,
       userKeywords: sessionRow.user_keywords,
       title: sessionRow.title,
@@ -267,38 +284,41 @@ const processSession = async (sessionId, filePath) => {
         text_segment: u.text,
       }));
     }
-
-    // ── Step 5 — LLM correction (fix misheard words) ────────────────
-    console.log(`[Pipeline] Running LLM transcript correction...`);
-    const llmContext = {
-      participantNames: transcriptionMetadata.participantNames,
-      keywordBoostList: transcriptionMetadata.keywordBoostList,
-      title: sessionRow.title || '',
-      language: transcriptionResult.language || 'en',
-    };
-
-    let finalSegments;
-    try {
-      finalSegments = await correctTranscript(processedSegments, llmContext);
-    } catch (llmErr) {
-      console.warn(`[Pipeline] LLM correction failed (non-fatal): ${llmErr.message}`);
-      finalSegments = processedSegments; // Use uncorrected segments
-    }
-
     // ── Step 6 — Save each segment to transcripts table ─────────────
-    for (const segment of finalSegments) {
-      await pool.query(
-        `INSERT INTO transcripts (session_id, speaker_label, start_time, end_time, text_segment)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [
-          sessionId,
-          segment.speaker_label,
-          segment.start_time,
-          segment.end_time,
-          segment.text_segment,
-        ]
-      );
+    // Normalize speaker labels → clean "Speaker 1", "Speaker 2", etc.
+    // Handles SPEAKER_00, Speaker A, SPEAKER_01, unknown labels, etc.
+    const labelMap = {};
+    let speakerCounter = 1;
+    let finalSegments = processedSegments.map(seg => {
+      const raw = seg.speaker_label || 'Unknown';
+      if (!labelMap[raw]) {
+        labelMap[raw] = `Speaker ${speakerCounter++}`;
+      }
+      return { ...seg, speaker_label: labelMap[raw] };
+    });
+    console.log('[Pipeline] Speaker label map:', labelMap);
+
+    // Batch insert — single query instead of N individual INSERTs
+    if (finalSegments.length > 0) {
+      const BATCH_SIZE = 200; // pg has a ~65535 param limit; 200 rows × 5 cols = 1000 params
+      for (let b = 0; b < finalSegments.length; b += BATCH_SIZE) {
+        const batch = finalSegments.slice(b, b + BATCH_SIZE);
+        const values = [];
+        const params = [];
+        batch.forEach((seg, i) => {
+          const offset = i * 5;
+          values.push(`($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5})`);
+          params.push(sessionId, seg.speaker_label, seg.start_time, seg.end_time, seg.text_segment);
+        });
+        await pool.query(
+          `INSERT INTO transcripts (session_id, speaker_label, start_time, end_time, text_segment)
+           VALUES ${values.join(', ')}`,
+          params
+        );
+      }
+      console.log(`[Pipeline] Inserted ${finalSegments.length} transcript segments (batched)`);
     }
+
 
     // ── Step 7 — Mark session as completed ──────────────────────────
     await pool.query(
@@ -307,6 +327,19 @@ const processSession = async (sessionId, filePath) => {
        WHERE session_id = $1`,
       [sessionId, Math.round(duration)]
     );
+
+    // ── Step 8.5 — Structure the transcript (tasks, summary, expenses)
+    try {
+      await structureSession(
+        sessionId,
+        sessionRow.user_id,
+        finalSegments,
+        sessionRow.title,
+        transcriptionMetadata.participantNames
+      );
+    } catch (structureErr) {
+      console.warn('[Pipeline] Structuring failed (non-fatal):', structureErr.message);
+    }
 
     // ── Step 8 — Delete audio file ───────────────────────────────────
     fs.unlink(filePath, (err) => {

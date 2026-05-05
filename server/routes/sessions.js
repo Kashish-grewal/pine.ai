@@ -18,22 +18,17 @@ const router = express.Router();
 // ---------------------------------------------------------------------------
 // Protected. Accepts one audio file, saves to disk, creates a session row
 // in the DB with status = 'pending', returns session ID.
-//
-// The protect middleware runs first — if the token is missing or
-// expired the request never reaches the upload handler.
 // ---------------------------------------------------------------------------
 router.post(
   '/upload',
   protect,
   (req, res, next) => {
-    // Run multer, then pass multer errors to handleMulterError
     uploadAudio(req, res, (err) => {
       if (err) return handleMulterError(err, req, res, next);
       next();
     });
   },
   async (req, res, next) => {
-    // If multer didn't attach a file, the field was missing entirely
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -44,18 +39,21 @@ router.post(
 
     const { originalname, filename, size, mimetype, path: filePath } = req.file;
 
-    // Optional metadata the client can send alongside the file
     const title = req.body.title?.trim() || originalname;
     const description = req.body.description?.trim() || null;
+
     const participantNames = sanitizePhraseArray(req.body.participant_names, {
       maxItems: 20,
       maxLength: 80,
     });
+
     const expectedSpeakerCount = normalizeExpectedSpeakerCount(
       req.body.expected_speaker_count,
       participantNames.length
     );
+
     const languageLocale = normalizeLanguageLocale(req.body.language_locale);
+
     const userKeywords = sanitizePhraseArray(req.body.user_keywords, {
       maxItems: 40,
       maxLength: 80,
@@ -78,32 +76,22 @@ router.post(
     }
 
     try {
-      // -------------------------------------------------------------------
-      // Create the session row
-      // -------------------------- ------------------------------- ----------
-      // status starts as 'pending' — t he transcription job will move it
-      // through 'transcribing' → 'processing' → 'completed' (or 'failed').
-      //
-      // audio_url stores the relative path on disk. We store just the
-      // filename, not the full absolute path, so the app works regardless
-      // of where it's deployed.
-      // -------------------------------------------------------------------
       const result = await pool.query(
         `INSERT INTO sessions 
-           (
-             user_id, title, description, audio_url, audio_format, file_size_bytes,
-             participants, expected_speaker_count, language_locale, user_keywords,
-             status
-           )
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, 'pending')
-         RETURNING session_id, title, description, audio_format, file_size_bytes,
-                   participants, expected_speaker_count, language_locale, user_keywords,
-                   status, created_at`,
+         (
+           user_id, title, description, audio_url, audio_format, file_size_bytes,
+           participants, expected_speaker_count, language_locale, user_keywords,
+           status
+         )
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10::jsonb,'pending')
+         RETURNING session_id,title,description,audio_format,file_size_bytes,
+                   participants,expected_speaker_count,language_locale,
+                   user_keywords,status,created_at`,
         [
           req.user.userId,
           title,
           description,
-          filename,          // store only the generated filename
+          filename,
           mimetype,
           size,
           JSON.stringify(participantNames),
@@ -115,7 +103,6 @@ router.post(
 
       const session = result.rows[0];
 
-      // Respond immediately — don't make the user wait for transcription
       res.status(201).json({
         success: true,
         message: 'Audio uploaded successfully. Processing will begin shortly.',
@@ -133,19 +120,95 @@ router.post(
         },
       });
 
-      // Fire pipeline in the background — non-blocking
-      // filePath is the full disk path multer saved the file to
       processSession(session.session_id, filePath).catch((err) => {
         console.error('[Upload] Pipeline trigger failed:', err.message);
       });
 
     } catch (err) {
-      // -------------------------------------------------------------------
-      // If the DB insert fails, delete the file we just saved to disk.
-      // Orphaned files on disk with no DB record are a storage leak.
-      // -------------------------------------------------------------------
-      fs.unlink(filePath, () => { }); // fire and forget — don't block the error response
+      fs.unlink(filePath, () => {});
       next(err);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/sessions/upload-audio
+// ---------------------------------------------------------------------------
+// Upload audio for existing session and trigger pipeline
+// ---------------------------------------------------------------------------
+router.post(
+  '/upload-audio',
+  protect,
+  (req, res, next) => {
+    uploadAudio(req, res, (err) => {
+      if (err) return handleMulterError(err, req, res, next);
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      const { sessionId } = req.body;
+
+      if (!sessionId) {
+        return res.status(400).json({
+          success: false,
+          message: 'sessionId is required',
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'No audio file uploaded',
+        });
+      }
+
+      const audioPath = req.file.path;
+
+      const result = await pool.query(
+        `UPDATE sessions
+         SET audio_url = $1,
+             audio_format = $2,
+             file_size_bytes = $3,
+             status = $4,
+             updated_at = NOW()
+         WHERE session_id = $5
+         AND user_id = $6
+         RETURNING session_id`,
+        [
+          req.file.filename,
+          req.file.mimetype,
+          req.file.size,
+          'processing',
+          sessionId,
+          req.user.userId,
+        ]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Session not found',
+        });
+      }
+
+      processSession(sessionId, audioPath).catch((err) => {
+        console.error('[Session] Pipeline error:', err);
+      });
+
+      res.json({
+        success: true,
+        message: 'Audio uploaded successfully',
+        sessionId,
+      });
+
+    } catch (err) {
+      console.error('[Session] Upload error:', err);
+
+      res.status(500).json({
+        success: false,
+        message: 'Upload failed',
+      });
     }
   }
 );
@@ -153,29 +216,27 @@ router.post(
 // ---------------------------------------------------------------------------
 // GET /api/v1/sessions
 // ---------------------------------------------------------------------------
-// Returns all sessions for the authenticated user, newest first.
-// This powers the history/dashboard view on the frontend.
-// ---------------------------------------------------------------------------
 router.get('/', protect, async (req, res, next) => {
   try {
     const result = await pool.query(
       `SELECT 
-         session_id, title, description, audio_format, file_size_bytes,
-        participants, expected_speaker_count, language_locale, user_keywords,
-        auto_keywords, status, duration_secs, created_at, updated_at
+         session_id,title,description,audio_format,file_size_bytes,
+         participants,expected_speaker_count,language_locale,user_keywords,
+         auto_keywords,status,duration_secs,created_at,updated_at
        FROM sessions
        WHERE user_id = $1
        ORDER BY created_at DESC`,
       [req.user.userId]
     );
 
-    return res.json({
+    res.json({
       success: true,
       data: {
         sessions: result.rows,
         count: result.rows.length,
       },
     });
+
   } catch (err) {
     next(err);
   }
@@ -184,23 +245,16 @@ router.get('/', protect, async (req, res, next) => {
 // ---------------------------------------------------------------------------
 // GET /api/v1/sessions/:id
 // ---------------------------------------------------------------------------
-// Returns full details for a single session including transcript and summary
-// if they exist. The frontend polls this every few seconds to track progress.
-//
-// IMPORTANT: We always filter by BOTH session id AND user_id. This prevents
-// a logged-in user from fetching another user's session by guessing the ID.
-// ---------------------------------------------------------------------------
 router.get('/:id', protect, async (req, res, next) => {
   const { id } = req.params;
 
   try {
-    // Fetch the session — scoped to this user
     const sessionResult = await pool.query(
       `SELECT 
-         session_id, title, description, audio_format, file_size_bytes,
-        participants, expected_speaker_count, language_locale, user_keywords,
-        auto_keywords, transcription_metadata,
-        status, duration_secs, error_message, created_at, updated_at
+         session_id,title,description,audio_format,file_size_bytes,
+         participants,expected_speaker_count,language_locale,user_keywords,
+         auto_keywords,transcription_metadata,status,duration_secs,
+         error_message,created_at,updated_at
        FROM sessions
        WHERE session_id = $1 AND user_id = $2`,
       [id, req.user.userId]
@@ -210,35 +264,48 @@ router.get('/:id', protect, async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: 'Session not found.',
-        code: 'SESSION_NOT_FOUND',
       });
     }
 
-    const session = sessionResult.rows[0];
-
-    // Fetch transcript if it exists (will be null until transcription completes)
     const transcriptResult = await pool.query(
-      `SELECT transcript_id, speaker_label, start_time, end_time, text_segment, created_at
+      `SELECT transcript_id,speaker_label,start_time,end_time,text_segment,created_at
        FROM transcripts
        WHERE session_id = $1
        ORDER BY start_time ASC`,
       [id]
     );
 
-    // Fetch summary if it exists (will be null until LLM processing completes)
     const summaryResult = await pool.query(
-      `SELECT summary_id, executive_summary, key_decisions, sentiment, created_at
+      `SELECT summary_id,executive_summary,key_decisions,open_questions,owners,deadlines,sentiment,created_at
        FROM meeting_summaries
        WHERE session_id = $1`,
       [id]
     );
 
-    return res.json({
+    const tasksResult = await pool.query(
+      `SELECT task_id,assignee,description,deadline,priority,is_completed,created_at
+       FROM tasks
+       WHERE session_id = $1
+       ORDER BY created_at ASC`,
+      [id]
+    );
+
+    const transactionsResult = await pool.query(
+      `SELECT transaction_id,type,amount,category,description,logged_date
+       FROM transactions
+       WHERE session_id = $1
+       ORDER BY logged_date ASC`,
+      [id]
+    );
+
+    res.json({
       success: true,
       data: {
-        session,
-        transcript: transcriptResult.rows,        // ALL segments (array), not just row[0]
-        summary:    summaryResult.rows[0] || null, // Still single summary object
+        session:      sessionResult.rows[0],
+        transcript:   transcriptResult.rows,
+        summary:      summaryResult.rows[0] || null,
+        tasks:        tasksResult.rows,
+        transactions: transactionsResult.rows,
       },
     });
 
@@ -248,18 +315,160 @@ router.get('/:id', protect, async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
-// DELETE /api/v1/sessions/:id
+// POST /api/v1/sessions/:id/reprocess
 // ---------------------------------------------------------------------------
-// Deletes a session and its audio file from disk. Only the owner can delete.
-// Cascades to transcripts, tasks, summaries via DB foreign keys.
+// Re-run Groq structuring on existing transcript (no diarization re-do)
+// ---------------------------------------------------------------------------
+router.post('/:id/reprocess', protect, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // Verify session belongs to user and is completed
+    const { rows } = await pool.query(
+      `SELECT session_id, user_id, title, participants, status
+       FROM sessions WHERE session_id = $1 AND user_id = $2`,
+      [id, req.user.userId]
+    );
+
+    if (rows.length === 0)
+      return res.status(404).json({ success: false, message: 'Session not found.' });
+
+    if (rows[0].status !== 'completed')
+      return res.status(400).json({ success: false, message: 'Session must be completed first.' });
+
+    const session = rows[0];
+
+    // Fetch existing transcript segments
+    const transcriptResult = await pool.query(
+      `SELECT speaker_label, text_segment FROM transcripts
+       WHERE session_id = $1 ORDER BY start_time ASC`,
+      [id]
+    );
+
+    if (transcriptResult.rows.length === 0)
+      return res.status(400).json({ success: false, message: 'No transcript found.' });
+
+    res.json({ success: true, message: 'Re-processing insights…' });
+
+    const { structureSession } = require('../services/structuring');
+    const participants = Array.isArray(session.participants) ? session.participants : [];
+
+    // ── Normalize speaker labels in DB ──────────────────────────────
+    // Fixes corrupt labels (e.g. "don", "boss", "SPEAKER_00") → "Speaker 1", "Speaker 2"
+    const rawLabels = [...new Set(transcriptResult.rows.map(r => r.speaker_label).filter(Boolean))];
+    const needsNormalize = rawLabels.some(l => !/^Speaker \d+$/.test(l));
+
+    if (needsNormalize) {
+      console.log(`[Reprocess] Normalizing speaker labels: ${rawLabels.join(', ')}`);
+      const labelMap = {};
+      let counter = 1;
+      // Assign numbers in order of first appearance
+      for (const row of transcriptResult.rows) {
+        const raw = row.speaker_label || 'Unknown';
+        if (!labelMap[raw]) labelMap[raw] = `Speaker ${counter++}`;
+      }
+      // Update DB
+      for (const [oldLabel, newLabel] of Object.entries(labelMap)) {
+        if (oldLabel !== newLabel) {
+          await pool.query(
+            `UPDATE transcripts SET speaker_label = $1 WHERE session_id = $2 AND speaker_label = $3`,
+            [newLabel, id, oldLabel]
+          );
+        }
+      }
+      console.log('[Reprocess] Label map:', labelMap);
+
+      // Re-fetch with corrected labels
+      const refreshed = await pool.query(
+        `SELECT speaker_label, text_segment FROM transcripts WHERE session_id = $1 ORDER BY start_time ASC`,
+        [id]
+      );
+      var segments = refreshed.rows.map(r => ({
+        speaker_label: r.speaker_label,
+        text_segment:  r.text_segment,
+      }));
+    } else {
+      var segments = transcriptResult.rows.map(r => ({
+        speaker_label: r.speaker_label,
+        text_segment:  r.text_segment,
+      }));
+    }
+
+    // Run structuring FIRST, then delete old data only on success.
+    // structureSession uses ON CONFLICT for summaries and INSERTs for tasks/transactions.
+    // We delete old tasks/transactions first within structureSession's scope.
+    try {
+      // Delete old tasks and transactions (summaries use UPSERT so no delete needed)
+      await pool.query(`DELETE FROM tasks WHERE session_id = $1`, [id]);
+      await pool.query(`DELETE FROM transactions WHERE session_id = $1`, [id]);
+
+      // Run structuring synchronously so we know it succeeded
+      await structureSession(
+        session.session_id,
+        session.user_id,
+        segments,
+        session.title,
+        participants
+      );
+
+      console.log(`[Reprocess] ✅ Session ${id} re-processed successfully`);
+    } catch (structErr) {
+      console.error('[Reprocess] Structuring failed:', structErr.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Re-processing failed. Previous data may be incomplete.',
+      });
+    }
+
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/sessions/:id/rename-speaker
+// ---------------------------------------------------------------------------
+// Manually rename all transcript segments from one speaker label to another.
+// LLM mapping runs automatically — this is the human fallback.
+// ---------------------------------------------------------------------------
+router.post('/:id/rename-speaker', protect, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { oldLabel, newLabel } = req.body;
+
+    if (!oldLabel || !newLabel)
+      return res.status(400).json({ success: false, message: 'oldLabel and newLabel required.' });
+
+    // Verify session belongs to user
+    const { rows } = await pool.query(
+      'SELECT session_id FROM sessions WHERE session_id = $1 AND user_id = $2',
+      [id, req.user.userId]
+    );
+    if (rows.length === 0)
+      return res.status(404).json({ success: false, message: 'Session not found.' });
+
+    const result = await pool.query(
+      `UPDATE transcripts SET speaker_label = $1
+       WHERE session_id = $2 AND speaker_label = $3`,
+      [newLabel.trim(), id, oldLabel]
+    );
+
+    res.json({ success: true, updated: result.rowCount });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/sessions/:id
+
 // ---------------------------------------------------------------------------
 router.delete('/:id', protect, async (req, res, next) => {
   const { id } = req.params;
 
   try {
-    // Get the session first so we know the filename to delete from disk
     const sessionResult = await pool.query(
-      `SELECT session_id, audio_url FROM sessions WHERE session_id = $1 AND user_id = $2`,
+      `SELECT session_id,audio_url
+       FROM sessions
+       WHERE session_id = $1 AND user_id = $2`,
       [id, req.user.userId]
     );
 
@@ -267,25 +476,26 @@ router.delete('/:id', protect, async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: 'Session not found.',
-        code: 'SESSION_NOT_FOUND',
       });
     }
 
     const { audio_url } = sessionResult.rows[0];
 
-    // Delete from DB first — if the file delete fails it's not critical
-    await pool.query(`DELETE FROM sessions WHERE session_id = $1`, [id]);
+    await pool.query(
+      `DELETE FROM sessions WHERE session_id = $1`,
+      [id]
+    );
 
-    // Delete audio file from disk
     if (audio_url) {
       const filePath = path.join(__dirname, '..', 'uploads', 'temp', audio_url);
-      fs.unlink(filePath, () => { }); // fire and forget
+      fs.unlink(filePath, () => {});
     }
 
-    return res.json({
+    res.json({
       success: true,
       message: 'Session deleted successfully.',
     });
+
   } catch (err) {
     next(err);
   }

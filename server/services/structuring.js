@@ -49,6 +49,12 @@ Exact structure required:
       { "item": "Onboarding doc update", "due": "Next sprint" }
     ],
     "sentiment": "positive" | "neutral" | "urgent" | "negative"
+    "next_meeting": {
+      "date": "ISO 8601 date (YYYY-MM-DD) or natural phrase like \"next Friday\"",
+      "time": "time string like \"3:00 PM\" or null",
+      "agenda": "brief topic/agenda if mentioned, or null",
+      "location": "room, Zoom link, or platform mentioned, or null"
+    } | null
   },
   "tasks": [
     {
@@ -86,6 +92,10 @@ Rules for summary:
 - deadlines: Extract ALL time references attached to any task or decision
   - Use the exact phrasing from the meeting ("next sprint", "end of Q2", "by Friday")
   - If an ISO date can be inferred, include it. Today is ${today}.
+- next_meeting: Extract ONLY if the transcript explicitly mentions scheduling a follow-up.
+  - date: Convert to ISO 8601 if possible (today is ${today})
+  - "next week Friday" → compute the date
+  - Set entire field to null if no next meeting is mentioned
 - sentiment: urgent=deadlines/crises, negative=conflicts, positive=wins/celebrations, neutral=everything else
 
 Rules for tasks — EXTRACT AGGRESSIVELY:
@@ -151,6 +161,7 @@ const mergeSummaries = async (chunkSummaries, sessionTitle) => {
   const allOpenQuestions  = chunkSummaries.flatMap(s => s.open_questions || []);
   const allOwners        = chunkSummaries.flatMap(s => s.owners || []);
   const allDeadlines     = chunkSummaries.flatMap(s => s.deadlines || []);
+  const allNextMeetings  = chunkSummaries.map(s => s.next_meeting).filter(Boolean);
   const sentiments       = chunkSummaries.map(s => s.sentiment).filter(Boolean);
 
   try {
@@ -214,6 +225,7 @@ Part sentiments: ${sentiments.join(', ')}`
       sentiment: sentiments.includes('urgent') ? 'urgent' :
                  sentiments.includes('negative') ? 'negative' :
                  sentiments.includes('positive') ? 'positive' : 'neutral',
+      next_meeting: allNextMeetings[0] || null,  // use first chunk that found one
     };
   }
 };
@@ -314,14 +326,15 @@ const structureSession = async (sessionId, userId, segments, sessionTitle, parti
     try {
       await pool.query(
         `INSERT INTO meeting_summaries
-           (session_id, executive_summary, key_decisions, open_questions, owners, deadlines, sentiment)
-         VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7)
+           (session_id, executive_summary, key_decisions, open_questions, owners, deadlines, next_meeting, sentiment)
+         VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8)
          ON CONFLICT (session_id) DO UPDATE
            SET executive_summary = EXCLUDED.executive_summary,
                key_decisions     = EXCLUDED.key_decisions,
                open_questions    = EXCLUDED.open_questions,
                owners            = EXCLUDED.owners,
                deadlines         = EXCLUDED.deadlines,
+               next_meeting      = EXCLUDED.next_meeting,
                sentiment         = EXCLUDED.sentiment`,
         [
           sessionId,
@@ -330,6 +343,7 @@ const structureSession = async (sessionId, userId, segments, sessionTitle, parti
           JSON.stringify(s.open_questions || []),
           JSON.stringify(s.owners || []),
           JSON.stringify(s.deadlines || []),
+          s.next_meeting ? JSON.stringify(s.next_meeting) : null,
           ['positive','neutral','urgent','negative'].includes(s.sentiment) ? s.sentiment : 'neutral',
         ]
       );

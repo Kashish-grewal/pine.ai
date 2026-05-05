@@ -4,6 +4,7 @@ const { pool } = require('../db/db');
 const {
   sendSummaryEmail,
   sendSummaryToMultiple,
+  sendPersonalizedEmails,
   getEmailStatus,
   initializeEmailTable,
 } = require('../services/emailService');
@@ -211,6 +212,70 @@ router.get('/logs/:sessionId', protect, async (req, res) => {
     return res.json({ logs: logsResult.rows });
   } catch (err) {
     console.error('[Email Route] Logs failed:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================================
+// POST /email/send-personalized — Personalized email per participant
+// Each person gets only THEIR tasks + shared summary + decisions
+// ================================================================
+router.post('/send-personalized', protect, async (req, res) => {
+  try {
+    const { sessionId, recipients } = req.body;
+    const userId = req.user.userId;
+
+    if (!sessionId || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: 'sessionId and recipients array required' });
+    }
+
+    // Validate each recipient has name + email
+    for (const r of recipients) {
+      if (!r.name || !r.email) {
+        return res.status(400).json({ error: 'Each recipient must have name and email fields' });
+      }
+    }
+
+    // Verify session ownership
+    const sessionResult = await pool.query(
+      'SELECT session_id, title FROM sessions WHERE session_id = $1 AND user_id = $2',
+      [sessionId, userId]
+    );
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    const session = sessionResult.rows[0];
+
+    // Fetch summary and all tasks
+    const [summaryResult, tasksResult] = await Promise.all([
+      pool.query('SELECT * FROM meeting_summaries WHERE session_id = $1', [sessionId]),
+      pool.query('SELECT * FROM tasks WHERE session_id = $1 ORDER BY priority DESC', [sessionId]),
+    ]);
+
+    const summary  = summaryResult.rows[0] || null;
+    const allTasks = tasksResult.rows || [];
+
+    // Extract next_meeting if stored in summary
+    const nextMeeting = summary?.next_meeting || null;
+
+    const results = await sendPersonalizedEmails({
+      sessionId,
+      sessionTitle: session.title,
+      recipients,
+      summary,
+      allTasks,
+      nextMeeting,
+    });
+
+    return res.json({
+      success: true,
+      sent: results.successful.length,
+      failed: results.failed.length,
+      successful: results.successful,
+      failed: results.failed,
+    });
+  } catch (err) {
+    console.error('[Email Route] Personalized send failed:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });

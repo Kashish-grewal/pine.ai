@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Pine.AI — Meeting Recorder",
+  "version": "1.0.0",
+  "description": "Automatically captures Google Meet audio and participant info. Sends personalized action items to each participant via Pine.AI.",
+
+  "permissions": [
+    "tabCapture",
+    "tabs",
+    "storage",
+    "scripting",
+    "offscreen",
+    "notifications"
+  ],
+
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "http://localhost:5001/*",
+    "https://*.pine.ai/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Pine.AI Recorder"
+  },
+
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

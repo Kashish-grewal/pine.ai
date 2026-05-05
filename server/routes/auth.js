@@ -478,4 +478,31 @@ router.post('/google', async (req, res, next) => {
   }
 });
 
+// ================================================================
+// GET /api/v1/auth/extension-token
+// Returns a fresh access token for the Chrome extension.
+// User visits dashboard → clicks "Connect Extension" → copies token.
+// ================================================================
+router.get('/extension-token', protect, async (req, res, next) => {
+  try {
+    const result = await query(
+      'SELECT user_id, email FROM users WHERE user_id = $1',
+      [req.user.userId]
+    );
+    const user = result.rows[0];
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+
+    // Generate a fresh access token (7 day)
+    const accessToken = generateAccessToken(user.user_id, user.email);
+
+    res.json({
+      success: true,
+      data: {
+        token:  accessToken,
+        apiUrl: process.env.PUBLIC_API_URL || `http://localhost:5001`,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

@@ -181,6 +181,121 @@ const formatSummaryEmail = (summary, tasks, transactions, sessionData) => {
 };
 
 /**
+ * Format a PERSONALIZED email for a specific participant.
+ * They see: their own tasks + shared summary + shared decisions.
+ */
+const formatPersonalizedEmail = ({
+  recipientName,
+  myTasks,
+  allTasks,
+  summary,
+  sessionTitle,
+  nextMeeting,
+}) => {
+  const s = summary || {};
+  const sentimentColor = { positive: '#10b981', neutral: '#6366f1', negative: '#ef4444', urgent: '#f59e0b' };
+  const headerColor = sentimentColor[s.sentiment] || '#6366f1';
+
+  const taskRows = (myTasks || []).map((t, i) => {
+    const ical = t.deadline ? generateICalEvent(t, 'meetings@pine.ai') : null;
+    const calBtn = ical
+      ? `<a href="data:text/calendar;base64,${Buffer.from(ical).toString('base64')}" download="task-${i}.ics" style="background:#3b82f6;color:#fff;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:11px;display:inline-block;margin-top:8px;">📅 Add to Calendar</a>`
+      : '';
+    const priorityColor = { urgent: '#ef4444', high: '#f59e0b', normal: '#6366f1', low: '#9ca3af' }[t.priority] || '#6366f1';
+    return `
+      <div style="background:#f9fafb;border-left:4px solid ${priorityColor};border-radius:6px;padding:12px;margin-bottom:10px;">
+        <div style="font-weight:600;color:#111827;">${t.description || 'Task'}</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px;">
+          ${t.deadline ? `📅 Due: <strong>${new Date(t.deadline).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })}</strong> &nbsp;` : ''}
+          <span style="background:${priorityColor}22;color:${priorityColor};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${(t.priority || 'normal').toUpperCase()}</span>
+        </div>
+        ${calBtn}
+      </div>`;
+  }).join('');
+
+  const decisionRows = (s.key_decisions || []).map(d =>
+    `<li style="margin-bottom:6px;color:#374151;">${d}</li>`
+  ).join('');
+
+  const otherPeople = (allTasks || [])
+    .filter(t => t.assignee && t.assignee.toLowerCase() !== (recipientName || '').toLowerCase())
+    .reduce((acc, t) => {
+      if (!acc[t.assignee]) acc[t.assignee] = [];
+      acc[t.assignee].push(t.description || 'Task');
+      return acc;
+    }, {});
+
+  const teamRows = Object.entries(otherPeople).map(([name, taskDescs]) =>
+    `<li style="margin-bottom:6px;"><strong>${name}</strong>: ${taskDescs.join(', ')}</li>`
+  ).join('');
+
+  const nextMeetingSection = nextMeeting ? `
+    <div style="margin-bottom:24px;">
+      <div style="font-size:16px;font-weight:600;border-bottom:2px solid #e5e7eb;padding-bottom:8px;margin-bottom:12px;">🗓 Next Meeting</div>
+      <div style="background:#eff6ff;border-left:4px solid #3b82f6;border-radius:6px;padding:12px;">
+        <div style="font-weight:600;color:#1d4ed8;">${nextMeeting.date || ''} ${nextMeeting.time || ''}</div>
+        ${nextMeeting.agenda ? `<div style="color:#374151;font-size:13px;margin-top:4px;">Agenda: ${nextMeeting.agenda}</div>` : ''}
+      </div>
+    </div>` : '';
+
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Your Meeting Summary — Pine.AI</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4f6;margin:0;padding:20px;">
+  <div style="max-width:600px;margin:0 auto;">
+
+    <!-- Header -->
+    <div style="background:${headerColor};border-radius:12px 12px 0 0;padding:24px 28px;">
+      <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:4px;">pine.ai · Meeting Summary</div>
+      <h1 style="margin:0;color:#fff;font-size:22px;">${sessionTitle || 'Meeting Summary'}</h1>
+      <p style="margin:8px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">Hi ${recipientName || 'there'} 👋 — here's your personal action plan.</p>
+    </div>
+
+    <!-- Body -->
+    <div style="background:#fff;border-radius:0 0 12px 12px;padding:28px;">
+
+      <!-- Overview -->
+      ${s.executive_summary ? `
+      <div style="margin-bottom:24px;">
+        <div style="font-size:16px;font-weight:600;border-bottom:2px solid #e5e7eb;padding-bottom:8px;margin-bottom:12px;">📝 Meeting Overview</div>
+        <p style="color:#4b5563;line-height:1.7;margin:0;">${s.executive_summary}</p>
+      </div>` : ''}
+
+      <!-- Your Tasks -->
+      <div style="margin-bottom:24px;">
+        <div style="font-size:16px;font-weight:600;border-bottom:2px solid #e5e7eb;padding-bottom:8px;margin-bottom:12px;">✅ Your Action Items (${(myTasks || []).length})</div>
+        ${myTasks && myTasks.length > 0 ? taskRows : '<p style="color:#9ca3af;font-style:italic;">No tasks assigned to you in this meeting.</p>'}
+      </div>
+
+      <!-- Next meeting -->
+      ${nextMeetingSection}
+
+      <!-- Key Decisions -->
+      ${decisionRows ? `
+      <div style="margin-bottom:24px;">
+        <div style="font-size:16px;font-weight:600;border-bottom:2px solid #e5e7eb;padding-bottom:8px;margin-bottom:12px;">🎯 Key Decisions (Team)</div>
+        <ul style="margin:0;padding-left:20px;">${decisionRows}</ul>
+      </div>` : ''}
+
+      <!-- Team tasks overview -->
+      ${teamRows ? `
+      <div style="margin-bottom:24px;">
+        <div style="font-size:16px;font-weight:600;border-bottom:2px solid #e5e7eb;padding-bottom:8px;margin-bottom:12px;">👥 Team Tasks Overview</div>
+        <ul style="margin:0;padding-left:20px;">${teamRows}</ul>
+      </div>` : ''}
+
+      <!-- Footer -->
+      <div style="background:#f9fafb;border-radius:8px;padding:16px;font-size:12px;color:#9ca3af;text-align:center;">
+        Generated by <strong>Pine.AI</strong> · Reply to this email with any questions.
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
+
+/**
  * Send meeting summary email to participants
  * @param {Object} options - Email options
  * @param {number} options.sessionId - Session ID (for database tracking)
@@ -255,41 +370,92 @@ const sendSummaryEmail = async (options) => {
 };
 
 /**
- * Send summary to multiple participants
- * @param {Object} options
- * @param {number} options.sessionId
- * @param {Array} options.recipients - Array of email addresses or { email, name } objects
- * @param {string} options.userName
- * @param {Object} options.summary
- * @param {Array} options.tasks
- * @param {Array} options.transactions
- * @param {Object} options.sessionData
- * @returns {Promise<Object>} { successful: [], failed: [] }
+ * Send PERSONALIZED emails to each participant.
+ * Each person gets only their own tasks + shared summary + decisions.
+ *
+ * @param {Object} opts
+ * @param {string} opts.sessionId
+ * @param {string} opts.sessionTitle
+ * @param {Array}  opts.recipients  - [{ name: "Alice", email: "alice@co.com" }]
+ * @param {Object} opts.summary
+ * @param {Array}  opts.allTasks    - full task list (we filter per person)
+ * @param {Object} opts.nextMeeting - optional { date, time, agenda }
+ * @returns {Promise<{ successful: [], failed: [] }>}
+ */
+const sendPersonalizedEmails = async (opts) => {
+  const { sessionId, sessionTitle, recipients = [], summary, allTasks = [], nextMeeting } = opts;
+  const fromEmail = process.env.RESEND_FROM_EMAIL || 'noreply@pine.ai';
+  const results = { successful: [], failed: [] };
+
+  for (const recipient of recipients) {
+    const { name, email } = recipient;
+    if (!email) continue;
+
+    // Filter tasks where assignee matches this participant's name (case-insensitive)
+    const myTasks = allTasks.filter(
+      (t) => t.assignee && t.assignee.toLowerCase() === name.toLowerCase()
+    );
+
+    const html = formatPersonalizedEmail({
+      recipientName: name,
+      myTasks,
+      allTasks,
+      summary,
+      sessionTitle,
+      nextMeeting,
+    });
+
+    try {
+      const response = await resend.emails.send({
+        from: `Pine.AI <${fromEmail}>`,
+        to: email,
+        subject: `📋 Your action items from "${sessionTitle || 'the meeting'}"`,
+        html,
+      });
+
+      if (sessionId) {
+        await pool.query(
+          `INSERT INTO email_logs (session_id, recipient_email, status, sent_at) VALUES ($1, $2, $3, NOW())`,
+          [sessionId, email, 'sent']
+        ).catch(() => {});
+      }
+
+      console.log(`[Email] Personalized email sent to ${name} <${email}>`);
+      results.successful.push({ name, email, taskCount: myTasks.length });
+    } catch (err) {
+      console.error(`[Email] Failed to send to ${name} <${email}>: ${err.message}`);
+      if (sessionId) {
+        await pool.query(
+          `INSERT INTO email_logs (session_id, recipient_email, status, error_detail, sent_at) VALUES ($1, $2, $3, $4, NOW())`,
+          [sessionId, email, 'failed', err.message]
+        ).catch(() => {});
+      }
+      results.failed.push({ name, email, error: err.message });
+    }
+  }
+
+  console.log(`[Email] Personalized batch: ${results.successful.length} sent, ${results.failed.length} failed`);
+  return results;
+};
+
+/**
+ * Send summary to multiple participants (legacy — same email to all)
  */
 const sendSummaryToMultiple = async (options) => {
   const { recipients = [], ...rest } = options;
-
   const results = { successful: [], failed: [] };
 
   for (const recipient of recipients) {
     const toEmail = typeof recipient === 'string' ? recipient : recipient.email;
-    const recipientName = typeof recipient === 'string' ? 'Participant' : recipient.name || 'Participant';
-
     try {
-      await sendSummaryEmail({
-        ...rest,
-        toEmail,
-      });
+      await sendSummaryEmail({ ...rest, toEmail });
       results.successful.push(toEmail);
     } catch (err) {
       results.failed.push({ email: toEmail, error: err.message });
     }
   }
 
-  console.log(
-    `[Email] Batch send complete: ${results.successful.length} successful, ${results.failed.length} failed`
-  );
-
+  console.log(`[Email] Batch send: ${results.successful.length} ok, ${results.failed.length} failed`);
   return results;
 };
 
@@ -319,8 +485,10 @@ const initializeEmailTable = async () => {
 module.exports = {
   sendSummaryEmail,
   sendSummaryToMultiple,
+  sendPersonalizedEmails,
   getEmailStatus,
   generateICalEvent,
   formatSummaryEmail,
+  formatPersonalizedEmail,
   initializeEmailTable,
 };

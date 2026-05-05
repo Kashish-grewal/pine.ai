@@ -276,7 +276,7 @@ router.get('/:id', protect, async (req, res, next) => {
     );
 
     const summaryResult = await pool.query(
-      `SELECT summary_id,executive_summary,key_decisions,open_questions,owners,deadlines,sentiment,created_at
+      `SELECT summary_id,executive_summary,key_decisions,open_questions,owners,deadlines,next_meeting,sentiment,created_at
        FROM meeting_summaries
        WHERE session_id = $1`,
       [id]

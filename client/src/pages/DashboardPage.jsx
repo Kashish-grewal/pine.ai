@@ -51,6 +51,10 @@ export default function DashboardPage() {
   const [workflowData, setWorkflowData] = useState(null);
   const [loadingWorkflow, setLoadingWorkflow] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showExtensionModal, setShowExtensionModal] = useState(false);
+  const [extensionToken, setExtensionToken] = useState('');
+  const [tokenCopied, setTokenCopied] = useState(false);
+  const [tokenLoading, setTokenLoading] = useState(false);
   const mermaidRef = useRef(null);
 
   const pollRef      = useRef(null);
@@ -219,10 +223,26 @@ export default function DashboardPage() {
     <div className="app-shell">
       {/* ── Sidebar ───────────────────────────────────────────────── */}
       <aside className="sidebar">
-        <div className="sidebar-header">
-          <span className="logo-text">pine.ai</span>
-          <button className="btn-new" onClick={() => setShowUpload(true)} title="New recording">+</button>
-        </div>
+          <div className="sidebar-header">
+            <span className="logo-text">pine.ai</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className="btn-new"
+                title="Connect Chrome Extension"
+                style={{ fontSize: 14, background: '#1a1a3e', border: '1px solid #2a2a5e' }}
+                onClick={async () => {
+                  setTokenLoading(true);
+                  try {
+                    const res = await api.get('/auth/extension-token');
+                    setExtensionToken(res.data.data.token);
+                  } catch { setExtensionToken(''); }
+                  setTokenLoading(false);
+                  setShowExtensionModal(true);
+                }}
+              >🔌</button>
+              <button className="btn-new" onClick={() => setShowUpload(true)} title="New recording">+</button>
+            </div>
+          </div>
 
         <div className="sidebar-sessions">
           {sessions.length === 0 && (
@@ -393,6 +413,40 @@ export default function DashboardPage() {
                       <div className="summary-decisions" style={{ borderTop: '1px solid #1e1e1e', marginTop: 12, paddingTop: 12 }}>
                         <p className="summary-decisions-label">📅 Deadlines</p>
                         <ul>{summary.deadlines.map((d,i) => <li key={i}><strong>{d.item}</strong> — {d.due}</li>)}</ul>
+                      </div>
+                    )}
+
+                    {/* Next Meeting */}
+                    {summary.next_meeting && (
+                      <div style={{ borderTop: '1px solid #1e1e1e', marginTop: 12, paddingTop: 12 }}>
+                        <p className="summary-decisions-label">🗓 Next Meeting</p>
+                        <div style={{
+                          background: 'linear-gradient(135deg, #1a1a4e 0%, #0f0f2e 100%)',
+                          border: '1px solid #3b82f6',
+                          borderRadius: 8,
+                          padding: '12px 14px',
+                          marginTop: 8,
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: 28 }}>📆</span>
+                            <div>
+                              <div style={{ fontWeight: 700, color: '#93c5fd', fontSize: 15 }}>
+                                {summary.next_meeting.date || 'Date TBD'}
+                                {summary.next_meeting.time && <span style={{ fontWeight: 400, color: '#60a5fa', marginLeft: 8 }}>@ {summary.next_meeting.time}</span>}
+                              </div>
+                              {summary.next_meeting.agenda && (
+                                <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 3 }}>
+                                  Agenda: {summary.next_meeting.agenda}
+                                </div>
+                              )}
+                              {summary.next_meeting.location && (
+                                <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                                  📍 {summary.next_meeting.location}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -593,11 +647,90 @@ export default function DashboardPage() {
             <div onClick={e => e.stopPropagation()}>
               <EmailDistribution
                 sessionId={session.session_id}
+                session={session}
                 summary={summary}
                 tasks={tasks}
                 transactions={transactions}
                 onClose={() => setShowEmailModal(false)}
               />
+            </div>
+          </div>
+        )}
+        {/* ── Extension Connect Modal ─────────────────────────── */}
+        {showExtensionModal && (
+          <div className="modal-overlay" onClick={() => setShowExtensionModal(false)}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background: '#0f0f1a', borderRadius: 14, padding: 28,
+              border: '1px solid #1e1e2e', width: 460, maxWidth: '95vw',
+            }}>
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div>
+                  <h2 style={{ fontSize: 18, fontWeight: 700, color: '#e2e8f0', margin: 0 }}>🔌 Connect Chrome Extension</h2>
+                  <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>Auto-record Google Meet and get personalized summaries</p>
+                </div>
+                <button className="btn-ghost" onClick={() => setShowExtensionModal(false)}>✕</button>
+              </div>
+
+              {/* Token box */}
+              <div style={{ marginBottom: 20 }}>
+                <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>Your Auth Token (paste this into the extension settings):</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    readOnly
+                    value={tokenLoading ? 'Loading…' : (extensionToken || 'Failed to load token')}
+                    style={{
+                      flex: 1, background: '#1a1a2e', border: '1px solid #2a2a3e',
+                      borderRadius: 6, color: '#a5b4fc', padding: '8px 10px',
+                      fontSize: 11, fontFamily: 'monospace', outline: 'none',
+                    }}
+                  />
+                  <button
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(extensionToken);
+                      setTokenCopied(true);
+                      setTimeout(() => setTokenCopied(false), 2000);
+                    }}
+                    style={{
+                      padding: '8px 14px', borderRadius: 6, border: 'none',
+                      background: tokenCopied ? '#166534' : '#6366f1',
+                      color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: 12,
+                      whiteSpace: 'nowrap', transition: 'background 0.2s',
+                    }}
+                  >
+                    {tokenCopied ? '✓ Copied!' : '📋 Copy'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Steps */}
+              <div style={{ background: '#0a0a14', borderRadius: 10, padding: 16 }}>
+                <p style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', marginBottom: 12 }}>📋 Setup Steps:</p>
+                {[
+                  ['1', 'Open Chrome → go to', 'chrome://extensions'],
+                  ['2', 'Enable', 'Developer Mode (top right toggle)'],
+                  ['3', 'Click', '"Load unpacked" → select the /extension folder'],
+                  ['4', 'Click the 🌲 Pine.AI icon in Chrome toolbar'],
+                  ['5', 'Open Settings → paste your token above → Save'],
+                  ['6', 'Join a Google Meet → extension auto-detects it! 🎉'],
+                ].map(([num, prefix, highlight]) => (
+                  <div key={num} style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start' }}>
+                    <span style={{
+                      background: '#6366f1', color: '#fff', borderRadius: '50%',
+                      width: 20, height: 20, display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0,
+                    }}>{num}</span>
+                    <p style={{ fontSize: 12, color: '#9ca3af', margin: 0, lineHeight: 1.5 }}>
+                      {prefix}{' '}
+                      <span style={{ color: '#c4b5fd', fontFamily: 'monospace', fontSize: 11 }}>{highlight}</span>
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <p style={{ fontSize: 11, color: '#4b5563', marginTop: 14, textAlign: 'center' }}>
+                Extension folder: <span style={{ color: '#6366f1', fontFamily: 'monospace' }}>pine.ai/extension/</span>
+              </p>
             </div>
           </div>
         )}

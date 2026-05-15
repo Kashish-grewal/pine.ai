@@ -53,11 +53,23 @@ const Icons = {
     </svg>
   ),
   sparkle: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/>
+    </svg>
+  ),
+  pine: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2L7 9h10L12 2Z"/><path d="M12 7L5 16h14L12 7Z"/><path d="M12 13L4 22h16L12 13Z"/><line x1="12" y1="22" x2="12" y2="24"/>
     </svg>
   ),
 };
+
+const LogoMark = ({ size = 'default' }) => (
+  <span className={`landing-logomark ${size === 'small' ? 'landing-logomark-sm' : ''}`}>
+    <span className="landing-logomark-icon">{Icons.pine}</span>
+    <span className="landing-logomark-text">pine<span className="landing-logomark-dot">.ai</span></span>
+  </span>
+);
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -101,7 +113,7 @@ export default function LandingPage() {
     <div className="landing">
       {/* ── Nav ─────────────────────────────────────── */}
       <nav className="landing-nav">
-        <span className="landing-logo">pine.ai</span>
+        <LogoMark />
         <div className="landing-nav-links">
           <a href="#features">Features</a>
           <a href="#how-it-works">How It Works</a>
@@ -216,8 +228,34 @@ export default function LandingPage() {
 
       {/* ── Footer ──────────────────────────────────── */}
       <footer className="landing-footer">
-        <span className="landing-logo" style={{ fontSize: 15 }}>pine.ai</span>
-        <p>Built with care by Kashish</p>
+        <div className="landing-footer-top">
+          <div className="landing-footer-brand">
+            <LogoMark size="small" />
+            <p className="landing-footer-tagline">AI-powered meeting intelligence.<br />Record, transcribe, extract, distribute.</p>
+          </div>
+          <div className="landing-footer-columns">
+            <div className="landing-footer-col">
+              <h4>Product</h4>
+              <a href="#features">Features</a>
+              <a href="#how-it-works">How It Works</a>
+              <a href="https://github.com/Kashish-grewal/pine.ai" target="_blank" rel="noreferrer">GitHub</a>
+            </div>
+            <div className="landing-footer-col">
+              <h4>Resources</h4>
+              <a href="#how-it-works">Documentation</a>
+              <a href="#features">Chrome Extension</a>
+              <a href="#features">API Reference</a>
+            </div>
+            <div className="landing-footer-col">
+              <h4>Legal</h4>
+              <a href="#">Privacy Policy</a>
+              <a href="#">Terms of Service</a>
+            </div>
+          </div>
+        </div>
+        <div className="landing-footer-bottom">
+          <p>&copy; {new Date().getFullYear()} Pine.AI — Designed & built by Kashish Grewal</p>
+        </div>
       </footer>
     </div>
   );

@@ -505,4 +505,69 @@ router.get('/extension-token', protect, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ================================================================
+// POST /api/v1/auth/token-login
+// Skip email/password — just paste a valid access token to log in.
+// The frontend stores it and redirects to dashboard.
+// ================================================================
+router.post('/token-login', async (req, res, next) => {
+  try {
+    const { token } = req.body;
+
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Token is required.',
+      });
+    }
+
+    // Verify the token
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+    } catch (err) {
+      return res.status(401).json({
+        success: false,
+        message: err.name === 'TokenExpiredError'
+          ? 'Token has expired. Please generate a new one.'
+          : 'Invalid token. Please check and try again.',
+      });
+    }
+
+    // Fetch user from DB to confirm they still exist
+    const result = await query(
+      'SELECT user_id, email, full_name, avatar_url FROM users WHERE user_id = $1',
+      [decoded.userId]
+    );
+
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User associated with this token no longer exists.',
+      });
+    }
+
+    // Return fresh token + user info
+    const accessToken = generateAccessToken(user.user_id, user.email);
+
+    res.json({
+      success: true,
+      message: 'Connected successfully.',
+      data: {
+        user: {
+          id: user.user_id,
+          email: user.email,
+          full_name: user.full_name,
+          avatar_url: user.avatar_url,
+        },
+        accessToken,
+      },
+    });
+
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

@@ -76,6 +76,20 @@ recordBtn.addEventListener('click', async () => {
       $('settingsArrow').textContent = '▲';
       return;
     }
+
+    // Check if microphone permission was already granted
+    try {
+      const permResult = await navigator.permissions.query({ name: 'microphone' });
+      if (permResult.state === 'denied' || permResult.state === 'prompt') {
+        // Open permissions page in a new tab
+        chrome.tabs.create({ url: chrome.runtime.getURL('permissions.html') });
+        showMsg('🎤 Grant mic access in the new tab, then try again', true);
+        return;
+      }
+    } catch (e) {
+      // permissions.query may not work in all contexts — try anyway
+    }
+
     chrome.runtime.sendMessage({ type: 'MANUAL_START' });
   } else {
     chrome.runtime.sendMessage({ type: 'MANUAL_STOP' });

@@ -1,7 +1,9 @@
 {
-  "name": "client",
+  "name": "pine-ai",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "author": "Kashish Grewal",
+  "description": "AI Meeting Intelligence — Voice to Structured Insights",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,6 +14,7 @@
   "dependencies": {
     "@react-oauth/google": "^0.13.5",
     "axios": "^1.14.0",
+    "lucide-react": "^1.14.0",
     "mermaid": "^10.9.5",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

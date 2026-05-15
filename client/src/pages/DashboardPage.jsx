@@ -41,6 +41,7 @@ export default function DashboardPage() {
   const [dragOver, setDragOver]         = useState(false);
   const [uploading, setUploading]       = useState(false);
   const [uploadError, setUploadError]   = useState('');
+  const [searchQuery, setSearchQuery]       = useState('');
   const [titleInput, setTitleInput]     = useState('');
   const [descriptionInput, setDescriptionInput] = useState('');
   const [participantNamesInput, setParticipantNamesInput] = useState('');
@@ -48,6 +49,7 @@ export default function DashboardPage() {
   const [languageLocale, setLanguageLocale] = useState('en-IN');
   const [userKeywordsInput, setUserKeywordsInput] = useState('');
   const [activeTab, setActiveTab]       = useState('transcript');
+  const [theme, setTheme]               = useState(() => localStorage.getItem('pine_theme') || 'purple');
   const [workflowData, setWorkflowData] = useState(null);
   const [loadingWorkflow, setLoadingWorkflow] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -57,6 +59,11 @@ export default function DashboardPage() {
   const fileInputRef = useRef(null);
   const navigate     = useNavigate();
   const user         = authStore.getUser();
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('pine_theme', theme);
+  }, [theme]);
 
   useEffect(() => { if (!authStore.isLoggedIn()) navigate('/'); }, [navigate]);
   useEffect(() => { fetchSessions(); }, []);
@@ -191,6 +198,53 @@ export default function DashboardPage() {
     } catch { /* ignore */ }
   };
 
+  const exportToMarkdown = () => {
+    if (!sessionDetail) return;
+    const { session, summary, tasks, transcript } = sessionDetail;
+    let md = `# ${session.title}\n\n**Date:** ${new Date(session.created_at).toLocaleString()}\n**Status:** ${session.status}\n\n`;
+    
+    if (summary) {
+      md += `## 📝 Summary\n${summary.summary_text}\n\n`;
+      if (summary.key_decisions && summary.key_decisions.length) {
+        md += `### Key Decisions\n`;
+        summary.key_decisions.forEach(d => md += `- ${d}\n`);
+        md += `\n`;
+      }
+      if (summary.open_questions && summary.open_questions.length) {
+        md += `### Open Questions\n`;
+        summary.open_questions.forEach(q => md += `- ${q}\n`);
+        md += `\n`;
+      }
+    }
+
+    if (tasks && tasks.length) {
+      md += `## 🎯 Action Items\n`;
+      tasks.forEach(t => {
+        const assignee = t.assignee || 'Unassigned';
+        const deadline = t.deadline ? ` (Due: ${t.deadline})` : '';
+        md += `- [${t.is_completed ? 'x' : ' '}] **${assignee}**: ${t.description}${deadline}\n`;
+      });
+      md += `\n`;
+    }
+
+    if (transcript && transcript.length) {
+      md += `## 🗣️ Transcript\n`;
+      transcript.forEach(t => {
+        md += `**${t.speaker_label}** [${formatTime(t.start_time)}]: ${t.text}\n\n`;
+      });
+    }
+
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${session.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_summary.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const filteredSessions = sessions.filter(s => s.title.toLowerCase().includes(searchQuery.toLowerCase()));
+
   const onDragOver  = (e) => { e.preventDefault(); setDragOver(true); };
   const onDragLeave = () => setDragOver(false);
   const onDrop      = (e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
@@ -223,11 +277,22 @@ export default function DashboardPage() {
           <button className="btn-new" onClick={() => setShowUpload(true)} title="New recording">+</button>
         </div>
 
+        <div style={{ padding: '12px 16px 4px 16px', flexShrink: 0 }}>
+          <input 
+            type="text" 
+            placeholder="Search meetings..." 
+            className="input-field" 
+            style={{ width: '100%', padding: '8px 12px', fontSize: '12px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-1)' }}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+
         <div className="sidebar-sessions">
           {sessions.length === 0 && (
             <p className="sidebar-empty">No recordings yet.<br />Click + to upload one.</p>
           )}
-          {sessions.map(s => (
+          {filteredSessions.map(s => (
             <button
               key={s.session_id}
               className={`sidebar-item${activeSessionId === s.session_id ? ' active' : ''}`}
@@ -244,8 +309,26 @@ export default function DashboardPage() {
         </div>
 
         <div className="sidebar-footer">
+          <div className="theme-selector">
+            <span className="theme-label">THEME</span>
+            <div className="theme-options">
+              {['purple', 'blue', 'green', 'white', 'orange'].map(t => (
+                <button
+                  key={t}
+                  className={`theme-btn theme-${t} ${theme === t ? 'active' : ''}`}
+                  onClick={() => setTheme(t)}
+                  title={t}
+                  style={theme === t ? { boxShadow: `0 0 10px var(--accent), 0 0 20px var(--accent)` } : {}}
+                />
+              ))}
+            </div>
+          </div>
           <span className="user-email">{user?.email}</span>
-          <button className="btn-ghost" onClick={handleLogout}>Sign out</button>
+          <div className="footer-actions">
+            <button className="btn-ghost" onClick={() => navigate('/settings')}>⚙ Settings</button>
+            <button className="btn-ghost" onClick={handleLogout}>Sign out</button>
+          </div>
+          <div className="footer-credits">Built by Kashish</div>
         </div>
       </aside>
 
@@ -332,8 +415,9 @@ export default function DashboardPage() {
                 </div>
               </div>
               {session.status === 'completed' && (
-                <div className="detail-header-actions">
+                <div className="detail-header-actions" style={{ display: 'flex', gap: '8px' }}>
                   <button className="btn-ghost btn-sm" onClick={() => setShowEmailModal(true)}>📧 Share</button>
+                  <button className="btn-ghost btn-sm" onClick={exportToMarkdown}>⬇️ Download</button>
                   <button className="btn-ghost btn-sm" onClick={handleReprocess}>Re-process insights</button>
                 </div>
               )}

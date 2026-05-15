@@ -426,6 +426,63 @@ router.post('/:id/reprocess', protect, async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/v1/sessions/:id/retry
+// ---------------------------------------------------------------------------
+// Force retry a stuck or failed session.
+// ---------------------------------------------------------------------------
+router.post('/:id/retry', protect, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // Verify session belongs to user
+    const { rows } = await pool.query(
+      `SELECT session_id, audio_url, status 
+       FROM sessions WHERE session_id = $1 AND user_id = $2`,
+      [id, req.user.userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Session not found.' });
+    }
+
+    const session = rows[0];
+
+    // Check if audio file exists
+    if (!session.audio_url) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No audio file associated with this session. Cannot retry.' 
+      });
+    }
+
+    const filePath = path.join(__dirname, '..', 'uploads', 'temp', session.audio_url);
+    if (!fs.existsSync(filePath)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Audio file has been deleted from the server. Cannot retry.' 
+      });
+    }
+
+    // Reset status and trigger pipeline
+    await pool.query(
+      `UPDATE sessions SET status = 'pending', error_message = NULL, updated_at = NOW() 
+       WHERE session_id = $1`,
+      [id]
+    );
+
+    res.json({ success: true, message: 'Retry triggered successfully.' });
+
+    // Enqueue for processing
+    processSession(id, filePath).catch((err) => {
+      console.error('[Retry] Pipeline trigger failed:', err.message);
+    });
+
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/v1/sessions/:id/rename-speaker
 // ---------------------------------------------------------------------------
 // Manually rename all transcript segments from one speaker label to another.

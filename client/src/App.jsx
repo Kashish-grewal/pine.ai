@@ -4,6 +4,7 @@ import { GoogleOAuthProvider } from '@react-oauth/google';
 import { authStore } from './store/authStore';
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
+import SettingsPage from './pages/SettingsPage';
 
 // ================================================================
 // APP — Routing + Google OAuth Provider
@@ -28,6 +29,7 @@ function AppRoutes() {
       <Routes>
         <Route path="/"          element={<AuthGuard />} />
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/settings"  element={<SettingsPage />} />
         <Route path="*"          element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

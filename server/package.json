@@ -1,7 +1,7 @@
 {
-  "name": "server",
+  "name": "pine-ai-server",
   "version": "1.0.0",
-  "description": "",
+  "description": "Pine.AI Backend — Meeting transcription, AI structuring, and email distribution",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -9,7 +9,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
+  "author": "Kashish Grewal",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
@@ -26,6 +26,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
+    "nodemailer": "^8.0.7",
     "pg": "^8.20.0",
     "resend": "^6.12.2",
     "uuid": "^13.0.0"

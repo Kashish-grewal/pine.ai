@@ -108,7 +108,8 @@ const splitAudioFile = async (filePath, maxSizeMB = MAX_FILE_SIZE_MB) => {
 // GROQ TRANSCRIPTION — Single chunk
 // ================================================================
 const transcribeChunkWithGroq = async (filePath, startOffset = 0, options = {}) => {
-  const language = (options.languageLocale || 'en').split(/[-_]/)[0].toLowerCase();
+  const rawLocale = (options.languageLocale || 'en').split(/[-_]/)[0].toLowerCase();
+  const language = rawLocale === 'auto' ? null : rawLocale;
   const buffer   = fs.readFileSync(filePath);
   const fileName = path.basename(filePath);
 
@@ -117,7 +118,8 @@ const transcribeChunkWithGroq = async (filePath, startOffset = 0, options = {}) 
   form.append('file', buffer, { filename: fileName });
   form.append('model', 'whisper-large-v3');
   form.append('response_format', 'verbose_json');
-  form.append('language', language);
+  // Only set language if not auto-detecting
+  if (language) form.append('language', language);
   form.append('timestamp_granularities[]', 'segment');
 
   const response = await axios.post(

@@ -16,7 +16,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
-const { testConnection } = require('./db/db');
+const { pool, testConnection } = require('./db/db');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -33,6 +33,27 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
   console.log('📁 Created uploads/temp directory');
 }
+
+// ---------------------------------------------------------------------------
+// Auto-cleanup: delete orphan temp files older than 24h (runs every hour)
+// ---------------------------------------------------------------------------
+const CLEANUP_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+setInterval(() => {
+  try {
+    const files = fs.readdirSync(uploadsDir);
+    const now = Date.now();
+    let cleaned = 0;
+    for (const f of files) {
+      const fp = path.join(uploadsDir, f);
+      const stat = fs.statSync(fp);
+      if (stat.isFile() && now - stat.mtimeMs > CLEANUP_MAX_AGE_MS) {
+        fs.unlinkSync(fp);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) console.log(`[Cleanup] Removed ${cleaned} orphan temp file(s)`);
+  } catch (e) { /* ignore */ }
+}, 60 * 60 * 1000); // every 1 hour
 
 // ---------------------------------------------------------------------------
 // Security headers
@@ -178,8 +199,26 @@ app.use((err, req, res, next) => {
 // ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------
+const cleanupStaleSessions = async () => {
+  try {
+    const result = await pool.query(
+      `UPDATE sessions 
+       SET status = 'failed', 
+           error_message = 'Session interrupted (server restart or timeout).'
+       WHERE status IN ('processing', 'pending')
+       AND updated_at < NOW() - INTERVAL '2 hours'`
+    );
+    if (result.rowCount > 0) {
+      console.log(`🧹 Cleaned up ${result.rowCount} stale sessions.`);
+    }
+  } catch (err) {
+    console.error('⚠️ Stale session cleanup failed:', err.message);
+  }
+};
+
 const startServer = async () => {
   await testConnection();
+  await cleanupStaleSessions();
 
   const server = app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT} [${process.env.NODE_ENV}]`);

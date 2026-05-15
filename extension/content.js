@@ -32,12 +32,12 @@ const scrapeParticipants = () => {
   });
 
   // Selector set 2 — video tiles in the grid
-  document.querySelectorAll('.dwSJ2e, .KF4T6b').forEach(el => {
-    const nameEl = el.querySelector('.XEazBc, .zWGUib');
+  document.querySelectorAll('.dwSJ2e, .KF4T6b, [data-allocation-index]').forEach(el => {
+    const nameEl = el.querySelector('.XEazBc, .zWGUib, [data-self-name]');
     if (nameEl?.textContent?.trim()) names.add(nameEl.textContent.trim());
   });
 
-  // Selector set 3 — bottom participant chips
+  // Selector set 3 — bottom participant chips and self-name
   document.querySelectorAll('[data-self-name]').forEach(el => {
     if (el.textContent.trim()) names.add(el.textContent.trim());
   });
@@ -47,8 +47,28 @@ const scrapeParticipants = () => {
     if (el.textContent.trim()) names.add(el.textContent.trim());
   });
 
-  // Filter out button text, empty strings, very long strings
-  return [...names].filter(n => n.length > 1 && n.length < 60 && !/button|mute|mic|cam/i.test(n));
+  // Selector set 5 — aria-label based (more stable across updates)
+  document.querySelectorAll('[aria-label*="is presenting"], [aria-label*="is in this call"]').forEach(el => {
+    const label = el.getAttribute('aria-label') || '';
+    const name = label.replace(/\s*(is presenting|is in this call).*$/i, '').trim();
+    if (name && name.length > 1) names.add(name);
+  });
+
+  // Selector set 6 — participant count indicator names
+  document.querySelectorAll('[data-tooltip]').forEach(el => {
+    const tooltip = el.getAttribute('data-tooltip') || '';
+    if (/^[A-Z][a-z]/.test(tooltip) && tooltip.length < 40 && !tooltip.includes(' is ')) {
+      names.add(tooltip.trim());
+    }
+  });
+
+  // Filter out button text, empty strings, very long strings, and UI labels
+  return [...names].filter(n =>
+    n.length > 1 &&
+    n.length < 60 &&
+    !/button|mute|mic|cam|present|meeting|chat|more|leave|raise/i.test(n) &&
+    !/^\d+$/.test(n) // exclude pure numbers
+  );
 };
 
 // ── Extract meeting title ─────────────────────────────────────────

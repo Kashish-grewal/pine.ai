@@ -235,47 +235,53 @@ graph TD
 function generateFallbackDiagram(title, decisions, tasks) {
   const lines = [
     'graph TD',
-    '    classDef topic fill:#FF69B4,stroke:#C71585,color:#000,font-weight:bold',
-    '    classDef decision fill:#FFD700,stroke:#FF8C00,color:#000,font-weight:bold',
-    '    classDef task fill:#00BFFF,stroke:#0047AB,color:#000,font-weight:bold',
-    '    classDef milestone fill:#7CFC00,stroke:#228B22,color:#000,font-weight:bold',
-    `    S(["${escMermaid(title || 'Meeting')} Start"]):::milestone`,
+    '    classDef topic fill:#2d5a9f,stroke:#4a90e2,color:#e0e0e0,font-weight:bold',
+    '    classDef decision fill:#2d8f5a,stroke:#4ac978,color:#e0e0e0,font-weight:bold',
+    '    classDef task fill:#8f532d,stroke:#d97d3a,color:#e0e0e0,font-weight:bold',
+    '    classDef milestone fill:#5a7fcf,stroke:#4a90e2,color:#e0e0e0,font-weight:bold',
+    `    S["🎯 ${escMermaid(title || 'Meeting')} Start"]:::milestone`,
   ];
 
-  const decList = (decisions || []).slice(0, 5);
-  const taskList = (tasks || []).slice(0, 6);
+  const decList = (decisions || []).slice(0, 4);
+  const taskList = (tasks || []).slice(0, 4);
 
   if (decList.length > 0) {
     decList.forEach((d, i) => {
-      lines.push(`    D${i}{"${escMermaid(String(d).substring(0, 35))}"}:::decision`);
+      lines.push(`    D${i}{"✓ ${escMermaid(String(d).substring(0, 25))}"}:::decision`);
     });
     lines.push('    S --> D0');
     for (let i = 0; i < decList.length - 1; i++) lines.push(`    D${i} --> D${i + 1}`);
   } else {
-    lines.push('    D0{No formal decisions}:::decision');
+    lines.push('    D0{"No Decisions Recorded"}:::decision');
     lines.push('    S --> D0');
   }
 
   const lastD = `D${Math.max(0, decList.length - 1)}`;
-  taskList.forEach((t, i) => {
-    const label = `${t.assignee || 'TBD'}: ${(t.description || 'Task').substring(0, 28)}`;
-    lines.push(`    T${i}{{"${escMermaid(label)}"}}:::task`);
-    lines.push(`    ${lastD} --> T${i}`);
-  });
-
-  lines.push('    E(["Meeting Complete"]):::milestone');
-  const lastNode = taskList.length > 0 ? `T${taskList.length - 1}` : lastD;
-  lines.push(`    ${lastNode} --> E`);
+  
+  if (taskList.length > 0) {
+    taskList.forEach((t, i) => {
+      const label = `${(t.assignee || 'TBD').substring(0, 8)}: ${(t.description || 'Task').substring(0, 20)}`;
+      lines.push(`    T${i}["📌 ${escMermaid(label)}"]:::task`);
+      lines.push(`    ${lastD} --> T${i}`);
+    });
+    lines.push('    E["✅ Meeting End"]:::milestone');
+    lines.push(`    T${taskList.length - 1} --> E`);
+  } else {
+    lines.push('    E["✅ Meeting End"]:::milestone');
+    lines.push(`    ${lastD} --> E`);
+  }
 
   return lines.join('\n');
 }
 
 function escMermaid(str) {
   return (str || '')
-    .replace(/"/g, "'")
-    .replace(/[[\]{}()#|]/g, '')
+    .replace(/"/g, "'")           // Replace quotes
+    .replace(/[\\]/g, '')         // Remove backslashes
+    .replace(/\n/g, ' ')          // Replace newlines with space
+    .replace(/[|{}()#\[\]]/g, '') // Remove problematic chars
     .trim()
-    .substring(0, 60);
+    .substring(0, 50);            // Cap length
 }
 
 module.exports = { generateMeetingWorkflow };

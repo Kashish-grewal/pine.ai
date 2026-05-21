@@ -348,8 +348,6 @@ router.post('/:id/reprocess', protect, async (req, res, next) => {
     if (transcriptResult.rows.length === 0)
       return res.status(400).json({ success: false, message: 'No transcript found.' });
 
-    res.json({ success: true, message: 'Re-processing insights…' });
-
     const { structureSession } = require('../services/structuring');
     const participants = Array.isArray(session.participants) ? session.participants : [];
 
@@ -357,6 +355,8 @@ router.post('/:id/reprocess', protect, async (req, res, next) => {
     // Fixes corrupt labels (e.g. "don", "boss", "SPEAKER_00") → "Speaker 1", "Speaker 2"
     const rawLabels = [...new Set(transcriptResult.rows.map(r => r.speaker_label).filter(Boolean))];
     const needsNormalize = rawLabels.some(l => !/^Speaker \d+$/.test(l));
+
+    let segments;
 
     if (needsNormalize) {
       console.log(`[Reprocess] Normalizing speaker labels: ${rawLabels.join(', ')}`);
@@ -383,12 +383,12 @@ router.post('/:id/reprocess', protect, async (req, res, next) => {
         `SELECT speaker_label, text_segment FROM transcripts WHERE session_id = $1 ORDER BY start_time ASC`,
         [id]
       );
-      var segments = refreshed.rows.map(r => ({
+      segments = refreshed.rows.map(r => ({
         speaker_label: r.speaker_label,
         text_segment:  r.text_segment,
       }));
     } else {
-      var segments = transcriptResult.rows.map(r => ({
+      segments = transcriptResult.rows.map(r => ({
         speaker_label: r.speaker_label,
         text_segment:  r.text_segment,
       }));
@@ -412,9 +412,10 @@ router.post('/:id/reprocess', protect, async (req, res, next) => {
       );
 
       console.log(`[Reprocess] ✅ Session ${id} re-processed successfully`);
+      res.json({ success: true, message: 'Re-processing complete.' });
     } catch (structErr) {
       console.error('[Reprocess] Structuring failed:', structErr.message);
-      return res.status(500).json({
+      res.status(500).json({
         success: false,
         message: 'Re-processing failed. Previous data may be incomplete.',
       });

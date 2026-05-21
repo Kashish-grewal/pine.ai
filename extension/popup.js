@@ -26,7 +26,7 @@ function setStatus(state, title = '', participants = []) {
   const labels = {
     idle:      'Idle — not in a meeting',
     detected:  'Meeting detected',
-    recording: '🔴 Recording in progress',
+    recording: 'Recording in progress',
   };
   statusLabel.textContent = labels[state] || state;
 
@@ -71,7 +71,7 @@ recordBtn.addEventListener('click', async () => {
     // Check auth token before starting
     const { pineAuthToken } = await chrome.storage.local.get('pineAuthToken');
     if (!pineAuthToken) {
-      showMsg('⚠️ Set your auth token in Settings first!', true);
+      showMsg('Set your auth token in Settings first!', true);
       $('settingsBody').classList.add('open');
       $('settingsArrow').textContent = '▲';
       return;
@@ -83,7 +83,7 @@ recordBtn.addEventListener('click', async () => {
       if (permResult.state === 'denied' || permResult.state === 'prompt') {
         // Open permissions page in a new tab
         chrome.tabs.create({ url: chrome.runtime.getURL('permissions.html') });
-        showMsg('🎤 Grant mic access in the new tab, then try again', true);
+        showMsg('Grant mic access in the new tab, then try again', true);
         return;
       }
     } catch (e) {
@@ -141,7 +141,7 @@ $('saveBtn').addEventListener('click', async () => {
     autoRecord:     auto,
   });
 
-  showMsg('✅ Settings saved!');
+  showMsg('Settings saved!');
 });
 
 // ── Settings toggle ───────────────────────────────────────────────

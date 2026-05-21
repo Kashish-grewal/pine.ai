@@ -11,17 +11,17 @@ btn.addEventListener('click', async () => {
     stream.getTracks().forEach(t => t.stop());
     
     status.className = 'status success';
-    status.textContent = '✅ Microphone access granted! You can close this tab and start recording meetings.';
-    btn.textContent = '✅ Permission Granted';
+    status.textContent = 'Microphone access granted! You can close this tab and start recording meetings.';
+    btn.textContent = 'Permission Granted';
     btn.style.background = '#16a34a';
   } catch (err) {
     status.className = 'status error';
     if (err.name === 'NotAllowedError') {
-      status.textContent = "❌ Permission denied. Click the 🔒 icon in Chrome's address bar → Site settings → Microphone → Allow, then try again.";
+      status.textContent = "Permission denied. Click the lock icon in Chrome's address bar → Site settings → Microphone → Allow, then try again.";
     } else {
-      status.textContent = '❌ Error: ' + err.message;
+      status.textContent = 'Error: ' + err.message;
     }
     btn.disabled = false;
-    btn.textContent = '🎤 Try Again';
+    btn.textContent = 'Try Again';
   }
 });

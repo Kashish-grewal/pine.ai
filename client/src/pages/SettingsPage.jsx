@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { authStore } from '../store/authStore';
 
 // ================================================================
+import { Icons } from '../components/Icons';
+
 // SETTINGS PAGE — Extension Token + Account Info
 // ================================================================
 // This page lets the user:
@@ -53,7 +55,7 @@ export default function SettingsPage() {
         {/* Header */}
         <div className="settings-header">
           <button className="btn-back" onClick={() => navigate('/dashboard')}>
-            ← Dashboard
+            {Icons.arrowLeft} Dashboard
           </button>
           <h1 className="settings-title">Settings</h1>
           <p className="settings-subtitle">Account & Chrome Extension</p>
@@ -61,7 +63,7 @@ export default function SettingsPage() {
 
         {/* Account Card */}
         <div className="settings-card">
-          <h2 className="card-title">👤 Account</h2>
+          <h2 className="card-title">{Icons.user} Account</h2>
           <div className="account-info">
             <div className="account-row">
               <span className="account-label">Email</span>
@@ -76,7 +78,7 @@ export default function SettingsPage() {
 
         {/* Extension Token Card */}
         <div className="settings-card highlight">
-          <h2 className="card-title">🔌 Chrome Extension Setup</h2>
+          <h2 className="card-title">{Icons.plug} Chrome Extension Setup</h2>
           <p className="card-desc">
             Copy your auth token below and paste it into the Pine.AI Chrome extension settings.
           </p>
@@ -88,7 +90,7 @@ export default function SettingsPage() {
             </div>
             <div className="step">
               <span className="step-num">2</span>
-              <span>Click the extension icon → ⚙️ Settings</span>
+              <span>Click the extension icon → {Icons.settings} Settings</span>
             </div>
             <div className="step">
               <span className="step-num">3</span>
@@ -111,27 +113,27 @@ export default function SettingsPage() {
                 onClick={() => setShowToken(s => !s)}
                 title={showToken ? 'Hide token' : 'Show token'}
               >
-                {showToken ? '🙈' : '👁️'}
+                {showToken ? Icons.eyeOff : Icons.eye}
               </button>
               <button
                 className={`btn-token-action btn-copy ${copied ? 'copied' : ''}`}
                 onClick={handleCopy}
                 title="Copy to clipboard"
               >
-                {copied ? '✅ Copied!' : '📋 Copy'}
+                {copied ? <>{Icons.check} Copied!</> : <>{Icons.clipboard} Copy</>}
               </button>
             </div>
           </div>
 
           <p className="token-warning">
-            ⚠️ Keep this token private. It grants full access to your Pine.AI account.
+            <div style={{ display: 'flex', alignItems: 'center' }}>{Icons.warning} Keep this token private. It grants full access to your Pine.AI account.</div>
             Token expires in 7 days — come back here to get a new one.
           </p>
         </div>
 
         {/* Extension Status Card */}
         <div className="settings-card">
-          <h2 className="card-title">📡 Connection Info</h2>
+          <h2 className="card-title">{Icons.connection} Connection Info</h2>
           <div className="account-info">
             <div className="account-row">
               <span className="account-label">API Server</span>
@@ -144,7 +146,7 @@ export default function SettingsPage() {
             <div className="account-row">
               <span className="account-label">Token Status</span>
               <span className="account-value" style={{ color: token ? '#4ade80' : '#f87171' }}>
-                {token ? '✅ Active' : '❌ Not logged in'}
+                {token ? <>{Icons.check} Active</> : <>{Icons.x} Not logged in</>}
               </span>
             </div>
           </div>

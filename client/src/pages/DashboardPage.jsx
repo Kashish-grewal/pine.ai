@@ -188,6 +188,18 @@ export default function DashboardPage() {
     } catch (e) { alert('Failed: ' + (e.response?.data?.message || e.message)); }
   };
 
+  const handleDeleteSession = async () => {
+    if (!activeSessionId) return;
+    if (!window.confirm('Delete this recording? This cannot be undone.')) return;
+    try {
+      await api.delete(`/sessions/${activeSessionId}`);
+      setSessions(prev => prev.filter(s => s.session_id !== activeSessionId));
+      setActiveSessionId(null);
+      setSessionDetail(null);
+      alert('Recording deleted.');
+    } catch (e) { alert('Failed: ' + (e.response?.data?.message || e.message)); }
+  };
+
   const toggleTask = async (taskId, current) => {
     try {
       await api.patch(`/tasks/${taskId}`, { is_completed: !current });
@@ -419,15 +431,32 @@ export default function DashboardPage() {
                   <button className="btn-ghost btn-sm" onClick={() => setShowEmailModal(true)}>📧 Share</button>
                   <button className="btn-ghost btn-sm" onClick={exportToMarkdown}>⬇️ Download</button>
                   <button className="btn-ghost btn-sm" onClick={handleReprocess}>Re-process insights</button>
+                  <button className="btn-ghost btn-sm" onClick={handleDeleteSession} style={{ color: '#f87171' }} title="Delete recording">🗑 Delete</button>
+                </div>
+              )}
+              {session.status !== 'completed' && (
+                <div className="detail-header-actions" style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn-ghost btn-sm" onClick={handleDeleteSession} style={{ color: '#f87171' }} title="Delete recording">🗑 Delete</button>
                 </div>
               )}
             </div>
 
-            {/* Processing state */}
+            {/* Processing state — step indicator */}
             {(session.status === 'pending' || session.status === 'processing') && (
               <div className="processing-banner">
-                <div className="processing-dots"><span /><span /><span /></div>
-                <p>{session.status === 'pending' ? 'Queued for transcription…' : 'Transcribing audio — results will appear when ready.'}</p>
+                <div className="processing-steps">
+                  {[
+                    { label: 'Uploaded', done: true },
+                    { label: 'Transcribing', done: session.status === 'processing', active: session.status === 'processing' },
+                    { label: 'Extracting Insights', done: false },
+                    { label: 'Complete', done: false },
+                  ].map((step, i) => (
+                    <div key={i} className={`processing-step${step.done ? ' done' : ''}${step.active ? ' active' : ''}`}>
+                      <div className="processing-step-dot">{step.done && !step.active ? '✓' : (step.active ? <div className="spinner" style={{width:12,height:12,borderWidth:1.5}} /> : (i + 1))}</div>
+                      <span>{step.label}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

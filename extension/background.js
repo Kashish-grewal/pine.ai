@@ -76,7 +76,7 @@ function notify(title, message, id = 'pine-status') {
     chrome.notifications.create(id, {
       type:    'basic',
       iconUrl: 'icons/icon48.png',
-      title:   `🌲 Pine.AI — ${title}`,
+      title:   `Pine.AI — ${title}`,
       message,
     });
   } catch (e) {
@@ -108,7 +108,7 @@ async function startRecording(tabId) {
     startKeepalive();
 
     console.log('[Pine.AI BG] Recording started for tab', tabId);
-    notify('Recording Started', '🔴 Recording in progress. You can close this popup safely.');
+    notify('Recording Started', 'Recording in progress. You can close this popup safely.');
 
     chrome.action.setBadgeText({ text: '●' });
     chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
@@ -143,7 +143,7 @@ async function uploadToPineAI({ audioBase64, mimeType, title, participants }) {
   ]);
 
   if (!pineAuthToken) {
-    notify('Error', '⚠️ No auth token set. Open Pine.AI extension settings.');
+    notify('Error', 'No auth token set. Open Pine.AI extension settings.');
     return;
   }
 
@@ -180,7 +180,7 @@ async function uploadToPineAI({ audioBase64, mimeType, title, participants }) {
     const data = await response.json();
 
     if (response.ok && data.success) {
-      notify('Upload Complete ✅', `"${title}" saved! Check your dashboard for insights.`, 'pine-upload');
+      notify('Upload Complete', `"${title}" saved! Check your dashboard for insights.`, 'pine-upload');
       chrome.action.setBadgeText({ text: '✓' });
       chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
       setTimeout(() => chrome.action.setBadgeText({ text: '' }), 5000);
@@ -191,7 +191,7 @@ async function uploadToPineAI({ audioBase64, mimeType, title, participants }) {
 
   } catch (err) {
     console.error('[Pine.AI BG] Upload failed:', err.message);
-    notify('Upload Failed ❌', `${err.message}`, 'pine-upload');
+    notify('Upload Failed', `${err.message}`, 'pine-upload');
     chrome.action.setBadgeText({ text: '!' });
     chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
   }

@@ -269,8 +269,8 @@ router.post('/send-personalized', protect, async (req, res) => {
 
     return res.json({
       success: true,
-      sent: results.successful.length,
-      failed: results.failed.length,
+      sentCount: results.successful.length,
+      failedCount: results.failed.length,
       successful: results.successful,
       failed: results.failed,
     });

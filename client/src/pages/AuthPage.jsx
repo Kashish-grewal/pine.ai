@@ -8,6 +8,8 @@ import { authStore } from '../store/authStore';
 // AUTH PAGE — Login, Register, Google Sign-In, & Token Connect
 // ================================================================
 
+import { Icons } from '../components/Icons';
+
 export default function AuthPage() {
   const [mode, setMode] = useState('token'); // 'login' | 'register' | 'token'
   const [form, setForm] = useState({ full_name: '', email: '', password: '', token: '' });
@@ -110,7 +112,10 @@ export default function AuthPage() {
 
         {/* Logo */}
         <div className="auth-logo">
-          <span className="logo-text">pine.ai</span>
+          <div className="logo-container">
+            <span className="logo-icon">{Icons.pine}</span>
+            <span className="logo-text">pine<span className="logo-dot">.ai</span></span>
+          </div>
           <p className="logo-sub">Voice to Structured Intelligence</p>
         </div>
 
@@ -122,7 +127,7 @@ export default function AuthPage() {
             className={`auth-tab ${mode === 'token' ? 'active' : ''}`}
             onClick={() => switchMode('token')}
           >
-            🔑 Connect
+            {Icons.key} Connect
           </button>
           <button
             className={`auth-tab ${mode === 'login' ? 'active' : ''}`}

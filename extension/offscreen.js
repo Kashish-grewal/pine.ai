@@ -71,7 +71,7 @@ chrome.runtime.onMessage.addListener(async (msg, _sender, sendResponse) => {
           },
           video: false,
         });
-        console.log('[Pine.AI Offscreen] Microphone captured ✅');
+        console.log('[Pine.AI Offscreen] Microphone captured');
       } catch (micErr) {
         console.warn('[Pine.AI Offscreen] Microphone access denied, recording tab audio only:', micErr.message);
         micStream = null;

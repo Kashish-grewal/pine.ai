@@ -6,63 +6,7 @@ import { authStore } from '../store/authStore';
 // LANDING PAGE — Premium marketing page for Pine.AI
 // ================================================================
 
-// ── Inline SVG Icons (clean, minimal, Anthropic/OpenAI style) ──
-const Icons = {
-  mic: (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/>
-    </svg>
-  ),
-  brain: (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2a5 5 0 0 1 5 5c0 1.5-.5 2.5-1.5 3.5L12 14l-3.5-3.5C7.5 9.5 7 8.5 7 7a5 5 0 0 1 5-5Z"/>
-      <path d="M12 14v8"/><path d="M8 18h8"/><circle cx="8" cy="6" r="1"/><circle cx="16" cy="6" r="1"/>
-    </svg>
-  ),
-  target: (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
-    </svg>
-  ),
-  workflow: (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/>
-      <rect x="9" y="15" width="6" height="6" rx="1"/><path d="M6 9v3a1 1 0 0 0 1 1h3"/>
-      <path d="M18 9v3a1 1 0 0 1-1 1h-3"/><line x1="12" y1="12" x2="12" y2="15"/>
-    </svg>
-  ),
-  mail: (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
-    </svg>
-  ),
-  shield: (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>
-    </svg>
-  ),
-  arrow: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
-    </svg>
-  ),
-  chevron: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m6 9 6 6 6-6"/>
-    </svg>
-  ),
-  sparkle: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/>
-    </svg>
-  ),
-  pine: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2L7 9h10L12 2Z"/><path d="M12 7L5 16h14L12 7Z"/><path d="M12 13L4 22h16L12 13Z"/><line x1="12" y1="22" x2="12" y2="24"/>
-    </svg>
-  ),
-};
+import { Icons } from '../components/Icons';
 
 const LogoMark = ({ size = 'default' }) => (
   <span className={`landing-logomark ${size === 'small' ? 'landing-logomark-sm' : ''}`}>
@@ -81,13 +25,25 @@ export default function LandingPage() {
     }
   }, [navigate]);
 
-  // Subtle parallax on the hero glow orb
+  // Subtle parallax on the hero glow orb and mouse tracking for feature cards
   useEffect(() => {
     const handler = (e) => {
-      if (!heroGlowRef.current) return;
-      const x = (e.clientX / window.innerWidth - 0.5) * 30;
-      const y = (e.clientY / window.innerHeight - 0.5) * 30;
-      heroGlowRef.current.style.transform = `translate(${x}px, ${y}px)`;
+      // Hero orb parallax
+      if (heroGlowRef.current) {
+        const x = (e.clientX / window.innerWidth - 0.5) * 30;
+        const y = (e.clientY / window.innerHeight - 0.5) * 30;
+        heroGlowRef.current.style.transform = `translate(${x}px, ${y}px)`;
+      }
+      
+      // Feature cards hover glow
+      const cards = document.querySelectorAll('.landing-feature-card');
+      for (const card of cards) {
+        const rect = card.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        card.style.setProperty('--mouse-x', `${x}px`);
+        card.style.setProperty('--mouse-y', `${y}px`);
+      }
     };
     window.addEventListener('mousemove', handler);
     return () => window.removeEventListener('mousemove', handler);

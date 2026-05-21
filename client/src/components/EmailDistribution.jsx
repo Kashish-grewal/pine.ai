@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import client from '../api/client';
+import { Icons } from './Icons';
 
 const AVATAR_COLORS = [
   ['#FF69B4', '#C71585'], ['#00BFFF', '#0047AB'], ['#FFD700', '#FF8C00'],
@@ -101,17 +102,17 @@ const EmailDistribution = ({ sessionId, session, summary, tasks, transactions, o
     return (
       <div className="email-distribution">
         <div className="modal-header">
-          <h2>📧 Emails Sent</h2>
-          <button className="btn-ghost" onClick={onClose}>✕</button>
+          <div style={{ display: 'flex', alignItems: 'center' }}><h2>{Icons.mail} Emails Sent</h2></div>
+          <button className="btn-ghost" onClick={onClose}>{Icons.x}</button>
         </div>
         <div className="email-result">
-          <div style={{ fontSize: 48, textAlign: 'center', marginBottom: 12 }}>✅</div>
+          <div style={{ fontSize: 48, textAlign: 'center', marginBottom: 12 }}>{Icons.checkCircle}</div>
           <h3 style={{ textAlign: 'center', margin: '0 0 20px' }}>
             {sentCount} email{sentCount !== 1 ? 's' : ''} sent!
           </h3>
           {result.successful?.length > 0 && (
             <div className="result-section">
-              <h4>✓ Delivered:</h4>
+              <h4>{Icons.check} Delivered:</h4>
               <ul>
                 {result.successful.map((r, i) => (
                   <li key={i}>
@@ -125,7 +126,7 @@ const EmailDistribution = ({ sessionId, session, summary, tasks, transactions, o
           )}
           {result.failed?.length > 0 && (
             <div className="result-section failed">
-              <h4>✗ Failed:</h4>
+              <h4>{Icons.x} Failed:</h4>
               <ul>
                 {result.failed.map((r, i) => (
                   <li key={i}>
@@ -220,15 +221,15 @@ const EmailDistribution = ({ sessionId, session, summary, tasks, transactions, o
   return (
     <div className="email-distribution">
       <div className="modal-header">
-        <h2>📧 Share Meeting Summary</h2>
-        <button className="btn-ghost" onClick={onClose}>✕</button>
+        <div style={{ display: 'flex', alignItems: 'center' }}><h2>{Icons.mail} Share Meeting Summary</h2></div>
+        <button className="btn-ghost" onClick={onClose}>{Icons.x}</button>
       </div>
 
       {/* Mode tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, borderBottom: '1px solid #1e1e1e', paddingBottom: 12 }}>
         {[
-          { id: 'personalized', label: '🎯 Personalized' },
-          { id: 'broadcast',    label: '📢 Broadcast' },
+          { id: 'personalized', label: <>{Icons.target} Personalized</> },
+          { id: 'broadcast',    label: <>{Icons.broadcast} Broadcast</> },
         ].map(tab => (
           <button key={tab.id} onClick={() => setMode(tab.id)} style={{
             padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer',
@@ -254,7 +255,7 @@ const EmailDistribution = ({ sessionId, session, summary, tasks, transactions, o
             <>
               {assigneeRows.some(r => r.name !== 'Unassigned') && (
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-                  👤 Task Owners
+                  {Icons.user} Task Owners
                 </div>
               )}
               {assigneeRows.map((r, i) => renderRow(r, i, updateAssigneeEmail))}
@@ -265,7 +266,7 @@ const EmailDistribution = ({ sessionId, session, summary, tasks, transactions, o
           {extraRows.length > 0 && (
             <>
               <div style={{ fontSize: 11, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1, margin: '14px 0 8px' }}>
-                👥 Other Participants (no tasks)
+                {Icons.users} Other Participants (no tasks)
               </div>
               {extraRows.map((r, i) => renderRow(r, i, updateExtraEmail))}
             </>

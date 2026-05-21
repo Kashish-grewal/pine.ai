@@ -142,7 +142,7 @@ TASKS: ${taskList || 'None'}${totalTaskCount > 8 ? ` (+ ${totalTaskCount - 8} mo
 TRANSCRIPT: ${topicContext || 'N/A'}
 
 OUTPUT RULES — follow exactly:
-1. Start with:  graph TD
+1. Start with:  graph LR
 2. Copy these classDef lines verbatim on lines 2-5:
    classDef topic fill:#FF69B4,stroke:#C71585,color:#000,font-weight:bold
    classDef decision fill:#FFD700,stroke:#FF8C00,color:#000,font-weight:bold
@@ -166,7 +166,7 @@ OUTPUT RULES — follow exactly:
 8. Return ONLY the Mermaid code. No markdown fences. No explanation.
 
 Example output structure (use YOUR meeting content, not these placeholders):
-graph TD
+graph LR
     classDef topic fill:#FF69B4,stroke:#C71585,color:#000,font-weight:bold
     classDef decision fill:#FFD700,stroke:#FF8C00,color:#000,font-weight:bold
     classDef task fill:#00BFFF,stroke:#0047AB,color:#000,font-weight:bold
@@ -234,7 +234,7 @@ graph TD
 // ── Fallback (when LLM completely fails) ─────────────────────────
 function generateFallbackDiagram(title, decisions, tasks) {
   const lines = [
-    'graph TD',
+    'graph LR',
     '    classDef topic fill:#2d5a9f,stroke:#4a90e2,color:#e0e0e0,font-weight:bold',
     '    classDef decision fill:#2d8f5a,stroke:#4ac978,color:#e0e0e0,font-weight:bold',
     '    classDef task fill:#8f532d,stroke:#d97d3a,color:#e0e0e0,font-weight:bold',

@@ -135,6 +135,7 @@ const voiceProfileRoutes = require('./routes/voiceProfiles');
 const taskRoutes = require('./routes/tasks');
 const emailRoutes = require('./routes/email');
 const workflowRoutes = require('./routes/workflow');
+const extensionRoutes = require('./routes/extension');
 
 app.use('/api/v1/auth', authLimiter, authRoutes);
 app.use('/api/v1/sessions', sessionRoutes);
@@ -142,6 +143,7 @@ app.use('/api/v1/voice-profiles', voiceProfileRoutes);
 app.use('/api/v1/tasks', taskRoutes);
 app.use('/api/v1/email', emailRoutes);
 app.use('/api/v1/workflow', workflowRoutes);
+app.use('/api/v1/extension', extensionRoutes);
 
 // ---------------------------------------------------------------------------
 // API root

@@ -73,6 +73,7 @@ export default function LandingPage() {
         <div className="landing-nav-links">
           <a href="#features">Features</a>
           <a href="#how-it-works">How It Works</a>
+          <a onClick={() => navigate('/extension')} style={{ cursor: 'pointer' }}>Extension</a>
           <button className="landing-cta-sm" onClick={() => navigate('/auth')}>
             Get Started {Icons.arrow}
           </button>
@@ -97,9 +98,9 @@ export default function LandingPage() {
             <button className="landing-cta" onClick={() => navigate('/auth')}>
               Start Free {Icons.arrow}
             </button>
-            <a href="#features" className="landing-cta-ghost">
-              See Features {Icons.chevron}
-            </a>
+            <button className="landing-cta-ghost" onClick={() => navigate('/extension')} style={{ cursor: 'pointer' }}>
+              {Icons.download} Download Extension
+            </button>
           </div>
           <p className="landing-hero-note">No credit card · Self-hosted · Open source</p>
         </div>
@@ -199,7 +200,7 @@ export default function LandingPage() {
             <div className="landing-footer-col">
               <h4>Resources</h4>
               <a href="#how-it-works">Documentation</a>
-              <a href="#features">Chrome Extension</a>
+              <a onClick={() => navigate('/extension')} style={{ cursor: 'pointer' }}>Chrome Extension</a>
               <a href="#features">API Reference</a>
             </div>
             <div className="landing-footer-col">

@@ -21,6 +21,7 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AuthPage = lazy(() => import('./pages/AuthPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const ExtensionPage = lazy(() => import('./pages/ExtensionPage'));
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
@@ -84,6 +85,7 @@ function AppRoutes() {
         <Route path="/auth"      element={<AuthGuard />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/settings"  element={<SettingsPage />} />
+        <Route path="/extension" element={<ExtensionPage />} />
         <Route path="*"          element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>

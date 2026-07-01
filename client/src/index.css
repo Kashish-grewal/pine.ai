@@ -1480,7 +1480,7 @@ p { line-height: 1.6; color: var(--text-2); }
 }
 
 .empty-main-title {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 20px;
   font-weight: 400;
   color: #ffffff;
@@ -1536,7 +1536,7 @@ p { line-height: 1.6; color: var(--text-2); }
 }
 
 .modal-header h2 {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 20px;
   font-weight: 400;
   margin: 0;
@@ -1623,7 +1623,7 @@ p { line-height: 1.6; color: var(--text-2); }
   background: transparent;
   border: none;
   padding: 12px 18px;
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 15px;
   font-weight: 400;
   color: rgba(255, 255, 255, 0.5);
@@ -1704,7 +1704,7 @@ p { line-height: 1.6; color: var(--text-2); }
 }
 
 .task-assignee-name {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 15px;
   font-weight: 400;
   color: #ffffff;
@@ -1879,7 +1879,7 @@ p { line-height: 1.6; color: var(--text-2); }
 }
 
 .txn-total-card strong {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 22px;
   font-weight: 400;
 }
@@ -1910,7 +1910,7 @@ p { line-height: 1.6; color: var(--text-2); }
 }
 
 .txn-category {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 15px;
   font-weight: 400;
   color: #ffffff;

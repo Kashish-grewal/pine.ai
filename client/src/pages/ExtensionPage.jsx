@@ -47,26 +47,21 @@ export default function ExtensionPage() {
     return () => window.removeEventListener('mousemove', handler);
   }, []);
 
-  const handleDownload = async () => {
+  const handleDownload = () => {
     setDownloading(true);
-    try {
-      const res = await fetch(`${API_BASE}/extension/download`);
-      if (!res.ok) throw new Error('Download failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'pine-ai-extension.zip';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('Download error:', err);
-      alert('Failed to download extension. Please try again.');
-    } finally {
+    // Use relative URL so it goes through Vite proxy (same-origin).
+    // Cross-origin URLs cause browsers to ignore the `download` attribute,
+    // resulting in UUID filenames instead of "pine-ai-extension.zip".
+    const a = document.createElement('a');
+    a.href = '/api/v1/extension/download';
+    a.download = 'pine-ai-extension.zip';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
       setDownloading(false);
-    }
+    }, 2000);
   };
 
   const steps = [

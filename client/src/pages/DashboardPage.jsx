@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { authStore } from '../store/authStore';
 import EmailDistribution from '../components/EmailDistribution';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 import mermaid from 'mermaid';
 
 // ── Calendar URL builder (client-side) ──────────────────────────
@@ -53,17 +55,27 @@ export default function DashboardPage() {
   const [workflowData, setWorkflowData] = useState(null);
   const [loadingWorkflow, setLoadingWorkflow] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('pine_sidebar_collapsed') === 'true');
+  const [uploadingFile, setUploadingFile] = useState(null);
   const mermaidRef = useRef(null);
+  const searchRef = useRef(null);
 
   const pollRef      = useRef(null);
   const fileInputRef = useRef(null);
   const navigate     = useNavigate();
   const user         = authStore.getUser();
+  const toast        = useToast();
+  const confirm      = useConfirm();
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('pine_theme', theme);
   }, [theme]);
+
+  // Persist sidebar collapse preference
+  useEffect(() => {
+    localStorage.setItem('pine_sidebar_collapsed', String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
 
   useEffect(() => { if (!authStore.isLoggedIn()) navigate('/'); }, [navigate]);
   useEffect(() => { fetchSessions(); }, []);
@@ -148,6 +160,7 @@ export default function DashboardPage() {
 
   const handleFile = async (file) => {
     if (!file) return;
+    setUploadingFile(file);
     const participantNames = parseList(participantNamesInput);
     const speakerCount     = parseInt(expectedSpeakerCount, 10);
     if (participantNames.length === 0) { setUploadError('Add at least one participant name.'); return; }
@@ -175,29 +188,38 @@ export default function DashboardPage() {
 
       selectSession(sessionId);
       startPolling(sessionId);
+      toast.success(`"${title}" uploaded successfully!`);
     } catch (err) {
-      setUploadError(!err.response ? 'Cannot connect to server.' : err.response?.data?.message || `Upload failed (${err.response.status}).`);
-    } finally { setUploading(false); }
+      const msg = !err.response ? 'Cannot connect to server.' : err.response?.data?.message || `Upload failed (${err.response.status}).`;
+      setUploadError(msg);
+      toast.error(msg);
+    } finally { setUploading(false); setUploadingFile(null); }
   };
 
   const handleReprocess = async () => {
     if (!activeSessionId) return;
     try {
       await api.post(`/sessions/${activeSessionId}/reprocess`);
-      alert('Re-processing started — results update in ~30 seconds.');
-    } catch (e) { alert('Failed: ' + (e.response?.data?.message || e.message)); }
+      toast.info('Re-processing started — results update in ~30 seconds.');
+    } catch (e) { toast.error('Failed: ' + (e.response?.data?.message || e.message)); }
   };
 
   const handleDeleteSession = async () => {
     if (!activeSessionId) return;
-    if (!window.confirm('Delete this recording? This cannot be undone.')) return;
+    const ok = await confirm({
+      title: 'Delete Recording',
+      message: 'This action cannot be undone. All transcripts, tasks, and insights will be permanently removed.',
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/sessions/${activeSessionId}`);
       setSessions(prev => prev.filter(s => s.session_id !== activeSessionId));
       setActiveSessionId(null);
       setSessionDetail(null);
-      alert('Recording deleted.');
-    } catch (e) { alert('Failed: ' + (e.response?.data?.message || e.message)); }
+      toast.success('Recording deleted.');
+    } catch (e) { toast.error('Failed: ' + (e.response?.data?.message || e.message)); }
   };
 
   const toggleTask = async (taskId, current) => {
@@ -257,6 +279,45 @@ export default function DashboardPage() {
 
   const filteredSessions = sessions.filter(s => s.title.toLowerCase().includes(searchQuery.toLowerCase()));
 
+  // ── Keyboard shortcuts ───────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      const isMod = e.metaKey || e.ctrlKey;
+
+      // Cmd/Ctrl + N → Open upload modal
+      if (isMod && e.key === 'n') {
+        e.preventDefault();
+        setShowUpload(true);
+        return;
+      }
+
+      // Cmd/Ctrl + K → Focus search
+      if (isMod && e.key === 'k') {
+        e.preventDefault();
+        searchRef.current?.focus();
+        return;
+      }
+
+      // Escape → Close modals
+      if (e.key === 'Escape') {
+        if (showUpload) { setShowUpload(false); return; }
+        if (showEmailModal) { setShowEmailModal(false); return; }
+      }
+
+      // Arrow Up/Down → Navigate sessions
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.target.closest('input, textarea, select')) {
+        e.preventDefault();
+        const idx = filteredSessions.findIndex(s => s.session_id === activeSessionId);
+        const next = e.key === 'ArrowDown'
+          ? Math.min(idx + 1, filteredSessions.length - 1)
+          : Math.max(idx - 1, 0);
+        if (filteredSessions[next]) selectSession(filteredSessions[next].session_id);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [showUpload, showEmailModal, activeSessionId, filteredSessions]);
+
   const onDragOver  = (e) => { e.preventDefault(); setDragOver(true); };
   const onDragLeave = () => setDragOver(false);
   const onDrop      = (e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
@@ -283,16 +344,22 @@ export default function DashboardPage() {
   return (
     <div className="app-shell">
       {/* ── Sidebar ───────────────────────────────────────────────── */}
-      <aside className="sidebar">
+      <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
         <div className="sidebar-header">
           <span className="logo-text">pine.ai</span>
-          <button className="btn-new" onClick={() => setShowUpload(true)} title="New recording">+</button>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <button className="btn-new" onClick={() => setShowUpload(true)} title="New recording (⌘N)">+</button>
+            <button className="btn-collapse" onClick={() => setSidebarCollapsed(c => !c)} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+              {sidebarCollapsed ? '▸' : '◂'}
+            </button>
+          </div>
         </div>
 
-        <div style={{ padding: '12px 16px 4px 16px', flexShrink: 0 }}>
+        <div className="sidebar-search-wrap" style={{ padding: '12px 16px 4px 16px', flexShrink: 0 }}>
           <input 
+            ref={searchRef}
             type="text" 
-            placeholder="Search meetings..." 
+            placeholder="Search meetings… (⌘K)" 
             className="input-field" 
             style={{ width: '100%', padding: '8px 12px', fontSize: '12px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-1)' }}
             value={searchQuery}
@@ -341,6 +408,7 @@ export default function DashboardPage() {
             <button className="btn-ghost" onClick={handleLogout}>Sign out</button>
           </div>
           <div className="footer-credits">Built by Kashish</div>
+          <div className="shortcuts-hint"><kbd>⌘</kbd><kbd>N</kbd> new · <kbd>⌘</kbd><kbd>K</kbd> search · <kbd>↑↓</kbd> nav</div>
         </div>
       </aside>
 
@@ -388,7 +456,17 @@ export default function DashboardPage() {
               <div className={`upload-zone${dragOver ? ' drag-over' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onClick={() => !uploading && fileInputRef.current?.click()}>
                 <input ref={fileInputRef} type="file" accept="audio/*,.mp3,.wav,.m4a,.webm,.ogg" style={{ display:'none' }} onChange={onFileChange} />
                 {uploading
-                  ? <div className="upload-status"><div className="spinner" /><p>Uploading…</p></div>
+                  ? <div className="upload-status">
+                      <div className="spinner" />
+                      <p>Uploading…</p>
+                      {uploadingFile && (
+                        <div className="upload-file-info">
+                          <span>{uploadingFile.name}</span>
+                          <span>({(uploadingFile.size / (1024 * 1024)).toFixed(1)} MB)</span>
+                        </div>
+                      )}
+                      <div className="upload-progress-bar" />
+                    </div>
                   : <><div className="upload-icon">◈</div><p className="upload-label">Drop audio file here or click to browse</p><p className="upload-sub">mp3 · wav · m4a · webm · up to 100 MB</p></>
                 }
               </div>
@@ -400,15 +478,34 @@ export default function DashboardPage() {
         {/* Empty state */}
         {!activeSessionId && !loadingDetail && (
           <div className="empty-main">
+            <div className="empty-main-icon">◈</div>
             <p className="empty-main-title">No recording selected</p>
             <p className="empty-main-sub">Click + in the sidebar to upload a new recording, or select one from the list.</p>
             <button className="btn-primary" onClick={() => setShowUpload(true)}>Upload recording</button>
           </div>
         )}
 
-        {/* Loading state */}
+        {/* Loading skeleton state */}
         {loadingDetail && (
-          <div className="empty-main"><div className="spinner" /></div>
+          <div className="detail-panel">
+            <div className="skeleton-detail-header">
+              <div className="skeleton skeleton-title" />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="skeleton skeleton-text" style={{ width: '60px' }} />
+                <div className="skeleton skeleton-text" style={{ width: '40px' }} />
+                <div className="skeleton skeleton-text" style={{ width: '50px' }} />
+              </div>
+            </div>
+            {[1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="skeleton-segment">
+                <div className="skeleton skeleton-avatar" />
+                <div className="skeleton-segment-lines">
+                  <div className="skeleton skeleton-text" style={{ width: `${60 + Math.random() * 30}%` }} />
+                  <div className="skeleton skeleton-text" style={{ width: `${40 + Math.random() * 40}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* Session detail */}

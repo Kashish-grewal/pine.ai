@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const { pool } = require('../db/db');
+const { buildCalendarUrl } = require('./calendarService');
 
 // ── Email transport setup ─────────────────────────────────────────
 // Priority: Gmail SMTP → Resend → disabled
@@ -180,7 +181,7 @@ const formatSummaryEmail = (summary, tasks, transactions, sessionData) => {
             </div>
             ${task.deadline ? `
               <div class="button-group">
-                ${(() => { const ical = generateICalEvent(task, 'meetings@pine.ai'); return ical ? `<a href="data:text/calendar;base64,${Buffer.from(ical).toString('base64')}" download="${task.task_id || 'task'}.ics" class="calendar-button">📅 Add to Calendar</a>` : ''; })()}
+                ${(() => { const calUrl = buildCalendarUrl(task); return calUrl ? `<a href="${calUrl}" target="_blank" class="calendar-button">📅 Add to Calendar</a>` : ''; })()}
               </div>
             ` : ''}
           </div>
@@ -232,9 +233,9 @@ const formatPersonalizedEmail = ({
   const headerColor = sentimentColor[s.sentiment] || '#6366f1';
 
   const taskRows = (myTasks || []).map((t, i) => {
-    const ical = t.deadline ? generateICalEvent(t, 'meetings@pine.ai') : null;
-    const calBtn = ical
-      ? `<a href="data:text/calendar;base64,${Buffer.from(ical).toString('base64')}" download="task-${i}.ics" style="background:#3b82f6;color:#fff;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:11px;display:inline-block;margin-top:8px;">📅 Add to Calendar</a>`
+    const calUrl = t.deadline ? buildCalendarUrl(t, sessionTitle) : null;
+    const calBtn = calUrl
+      ? `<a href="${calUrl}" target="_blank" style="background:#3b82f6;color:#fff;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:11px;display:inline-block;margin-top:8px;">📅 Add to Calendar</a>`
       : '';
     const priorityColor = { urgent: '#ef4444', high: '#f59e0b', normal: '#6366f1', low: '#9ca3af' }[t.priority] || '#6366f1';
     return `

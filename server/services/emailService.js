@@ -2,41 +2,80 @@ const nodemailer = require('nodemailer');
 const { pool } = require('../db/db');
 const { buildCalendarUrl } = require('./calendarService');
 
-// ── Email transport setup ─────────────────────────────────────────
-// Priority: Gmail SMTP → Resend → disabled
+// ── Transport priority: Gmail SMTP → Brevo API → Resend API → disabled
+// Gmail SMTP is fastest for local dev, but cloud hosts (Render, Railway)
+// often block outbound SMTP (ports 465/587). Brevo and Resend use HTTPS
+// so they work everywhere. Brevo free tier: 300 emails/day to ANYONE.
 let transporter = null;
 let transportType = 'none';
 
 if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
   transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     auth: {
+      type: 'login',
       user: process.env.GMAIL_USER,
       pass: process.env.GMAIL_APP_PASSWORD,
     },
+    tls: { rejectUnauthorized: true },
+    connectionTimeout: 10000, // 10s — fail fast if host blocks SMTP
+    greetingTimeout: 10000,
   });
   transportType = 'gmail';
   console.log(`[Email] ✅ Gmail SMTP configured (${process.env.GMAIL_USER})`);
+
+  transporter.verify((err) => {
+    if (err) {
+      console.error('[Email] ❌ Gmail SMTP failed — falling back to Brevo/Resend if configured:', err.message);
+    } else {
+      console.log('[Email] ✅ Gmail SMTP connection verified — ready to send to any address');
+    }
+  });
+
+} else if (process.env.BREVO_API_KEY) {
+  // Brevo — free 300 emails/day, HTTPS API, works on Render/Railway/any host
+  const { BrevoClient } = require('@getbrevo/brevo');
+  const brevoClient = new BrevoClient({ apiKey: process.env.BREVO_API_KEY });
+
+  const fromName  = process.env.BREVO_FROM_NAME  || 'Pine.AI';
+  const fromEmail = process.env.BREVO_FROM_EMAIL || process.env.GMAIL_USER || 'noreply@pine.ai';
+
+  transporter = {
+    sendMail: async ({ from, to, subject, text, html }) => {
+      // Parse "Name <email>" format if present
+      const toEmail = typeof to === 'string'
+        ? to.replace(/.*<(.+)>.*/, '$1').trim()
+        : to;
+
+      const data = await brevoClient.transactionalEmails.sendTransacEmail({
+        sender:      { name: fromName, email: fromEmail },
+        to:          [{ email: toEmail }],
+        subject,
+        textContent: text || '',
+        htmlContent: html || '',
+      });
+      return { messageId: data.body?.messageId || 'brevo-ok' };
+    },
+  };
+  transportType = 'brevo';
+  console.log('[Email] ✅ Brevo transport configured — sends to any address via HTTPS');
+
 } else if (process.env.RESEND_API_KEY) {
   const { Resend } = require('resend');
   const resend = new Resend(process.env.RESEND_API_KEY);
-  // Wrap Resend in a nodemailer-like interface
   transporter = {
     sendMail: async ({ from, to, subject, html }) => {
-      const res = await resend.emails.send({
-        from,
-        to,
-        subject,
-        html,
-      });
+      const res = await resend.emails.send({ from, to, subject, html });
       return { messageId: res.id };
     },
   };
   transportType = 'resend';
-  console.log('[Email] ✅ Resend transport configured');
+  console.log('[Email] ⚠️  Resend transport configured — NOTE: free tier onboarding@resend.dev only sends to account owner email');
 } else {
   console.warn('[Email] ⚠️ No email credentials set — email sending disabled');
-  console.warn('[Email]   Set GMAIL_USER + GMAIL_APP_PASSWORD, or RESEND_API_KEY');
+  console.warn('[Email]   Set BREVO_API_KEY (recommended), or GMAIL_USER + GMAIL_APP_PASSWORD, or RESEND_API_KEY');
 }
 
 // ================================================================
@@ -384,13 +423,20 @@ const sendSummaryEmail = async (options) => {
 
   const htmlContent = formatSummaryEmail(summary, tasks, transactions, sessionData);
   const fromEmail = process.env.GMAIL_USER || process.env.RESEND_FROM_EMAIL || 'noreply@pine.ai';
+  const plainText = `Meeting Summary from ${userName}\n\nThis email was sent from Pine.AI with your meeting summary and action items.\nPlease view this email in an HTML-capable email client for the best experience.`;
 
   try {
     const response = await transporter.sendMail({
       from: `Pine.AI <${fromEmail}>`,
+      replyTo: fromEmail,
       to: toEmail,
-      subject: `📋 Meeting Summary from ${userName}`,
+      subject: `Meeting Summary from ${userName}`,
+      text: plainText,
       html: htmlContent,
+      headers: {
+        'X-Mailer': 'Pine.AI',
+        'X-Priority': '3',
+      },
     });
 
     // Log email in database for tracking
@@ -464,12 +510,20 @@ const sendPersonalizedEmails = async (opts) => {
       nextMeeting,
     });
 
+    const plainTextBody = `Hi ${name},\n\nHere are your action items from "${sessionTitle || 'the meeting'}".\n\nYou have ${myTasks.length} task(s) assigned to you.\n\nPlease view this email in an HTML-capable email client for the full summary.\n\n— Pine.AI`;
+
     try {
       await transporter.sendMail({
         from: `Pine.AI <${fromEmail}>`,
+        replyTo: fromEmail,
         to: email,
-        subject: `📋 Your action items from "${sessionTitle || 'the meeting'}"`,
+        subject: `Your action items from "${sessionTitle || 'the meeting'}"`,
+        text: plainTextBody,
         html,
+        headers: {
+          'X-Mailer': 'Pine.AI',
+          'X-Priority': '3',
+        },
       });
 
       if (sessionId) {

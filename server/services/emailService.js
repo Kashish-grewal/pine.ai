@@ -2,13 +2,38 @@ const nodemailer = require('nodemailer');
 const { pool } = require('../db/db');
 const { buildCalendarUrl } = require('./calendarService');
 
-// ── Transport priority: Gmail SMTP (Port 587 STARTTLS) → Brevo API → Resend API → disabled
-// Gmail SMTP on Port 587 is authentic for @gmail.com senders (100% SPF/DKIM pass, works on Render).
+// ── Transport priority: Brevo HTTPS API → Gmail SMTP (local fallback) → Resend → disabled
+// Brevo uses HTTPS (port 443) — fast, zero SMTP timeouts on Render/cloud hosts.
 let transporter = null;
 let transportType = 'none';
 
-if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-  // ── Priority 1: Gmail SMTP (Authentic @gmail.com sender, port 587) ──
+if (process.env.BREVO_API_KEY) {
+  // ── Priority 1: Brevo HTTPS API (Works on Render/cloud hosts without socket timeouts) ──
+  const { BrevoClient } = require('@getbrevo/brevo');
+  const brevoClient = new BrevoClient({ apiKey: process.env.BREVO_API_KEY });
+  const fromName  = process.env.BREVO_FROM_NAME  || 'Pine.AI';
+  const fromEmail = process.env.BREVO_FROM_EMAIL || process.env.GMAIL_USER || 'kashishgrewal24@gmail.com';
+
+  transporter = {
+    sendMail: async ({ from, to, subject, text, html }) => {
+      const toEmail = typeof to === 'string'
+        ? to.replace(/.*<(.+)>.*/, '$1').trim()
+        : to;
+      const data = await brevoClient.transactionalEmails.sendTransacEmail({
+        sender:      { name: fromName, email: fromEmail },
+        to:          [{ email: toEmail }],
+        subject,
+        textContent: text || '',
+        htmlContent: html || '',
+      });
+      return { messageId: data.body?.messageId || 'brevo-ok' };
+    },
+  };
+  transportType = 'brevo';
+  console.log(`[Email] ✅ Brevo HTTPS transport active (sender: ${fromEmail})`);
+
+} else if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+  // ── Priority 2: Gmail SMTP (Local dev fallback) ──
   transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
@@ -28,34 +53,9 @@ if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
     if (err) {
       console.error('[Email] ❌ Gmail SMTP verification failed:', err.message);
     } else {
-      console.log('[Email] ✅ Gmail SMTP connection verified — ready to send to any address');
+      console.log('[Email] ✅ Gmail SMTP connection verified');
     }
   });
-
-} else if (process.env.BREVO_API_KEY) {
-  // ── Priority 2: Brevo API ──
-  const { BrevoClient } = require('@getbrevo/brevo');
-  const brevoClient = new BrevoClient({ apiKey: process.env.BREVO_API_KEY });
-  const fromName  = process.env.BREVO_FROM_NAME  || 'Pine.AI';
-  const fromEmail = process.env.BREVO_FROM_EMAIL || 'noreply@pine.ai';
-
-  transporter = {
-    sendMail: async ({ from, to, subject, text, html }) => {
-      const toEmail = typeof to === 'string'
-        ? to.replace(/.*<(.+)>.*/, '$1').trim()
-        : to;
-      const data = await brevoClient.transactionalEmails.sendTransacEmail({
-        sender:      { name: fromName, email: fromEmail },
-        to:          [{ email: toEmail }],
-        subject,
-        textContent: text || '',
-        htmlContent: html || '',
-      });
-      return { messageId: data.body?.messageId || 'brevo-ok' };
-    },
-  };
-  transportType = 'brevo';
-  console.log('[Email] ✅ Brevo transport configured via HTTPS');
 
 } else if (process.env.RESEND_API_KEY) {
   // ── Priority 3: Resend API ──

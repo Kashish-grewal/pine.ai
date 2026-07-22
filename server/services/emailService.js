@@ -2,18 +2,42 @@ const nodemailer = require('nodemailer');
 const { pool } = require('../db/db');
 const { buildCalendarUrl } = require('./calendarService');
 
-// ── Transport priority (smart): Brevo HTTPS → Gmail SMTP (local only) → Resend → disabled
-// Brevo uses HTTPS (port 443) — works on ALL cloud hosts including Render/Railway.
-// Gmail SMTP (port 465) is blocked by most cloud hosts — only used locally as fallback.
-// Resend free tier can only send to account owner — last resort.
+// ── Transport priority: Gmail SMTP (Port 587 STARTTLS) → Brevo API → Resend API → disabled
+// Gmail SMTP on Port 587 is authentic for @gmail.com senders (100% SPF/DKIM pass, works on Render).
 let transporter = null;
 let transportType = 'none';
 
-const setupBrevo = () => {
+if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+  // ── Priority 1: Gmail SMTP (Authentic @gmail.com sender, port 587) ──
+  transporter = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false, // STARTTLS
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASSWORD,
+    },
+    tls: { rejectUnauthorized: true },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+  });
+  transportType = 'gmail';
+  console.log(`[Email] ✅ Gmail SMTP configured on Port 587 (${process.env.GMAIL_USER})`);
+
+  transporter.verify((err) => {
+    if (err) {
+      console.error('[Email] ❌ Gmail SMTP verification failed:', err.message);
+    } else {
+      console.log('[Email] ✅ Gmail SMTP connection verified — ready to send to any address');
+    }
+  });
+
+} else if (process.env.BREVO_API_KEY) {
+  // ── Priority 2: Brevo API ──
   const { BrevoClient } = require('@getbrevo/brevo');
   const brevoClient = new BrevoClient({ apiKey: process.env.BREVO_API_KEY });
   const fromName  = process.env.BREVO_FROM_NAME  || 'Pine.AI';
-  const fromEmail = process.env.BREVO_FROM_EMAIL || process.env.GMAIL_USER || 'noreply@pine.ai';
+  const fromEmail = process.env.BREVO_FROM_EMAIL || 'noreply@pine.ai';
 
   transporter = {
     sendMail: async ({ from, to, subject, text, html }) => {
@@ -31,41 +55,10 @@ const setupBrevo = () => {
     },
   };
   transportType = 'brevo';
-  console.log('[Email] ✅ Brevo transport active — sends to any address via HTTPS');
-};
-
-if (process.env.BREVO_API_KEY) {
-  // ── Priority 1: Brevo (HTTPS, works everywhere including Render) ──
-  setupBrevo();
-
-} else if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-  // ── Priority 2: Gmail SMTP (local dev only — blocked on most cloud hosts) ──
-  transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    auth: {
-      type: 'login',
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-    tls: { rejectUnauthorized: true },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-  });
-  transportType = 'gmail';
-  console.log(`[Email] ✅ Gmail SMTP configured (${process.env.GMAIL_USER}) — local dev only`);
-
-  transporter.verify((err) => {
-    if (err) {
-      console.error('[Email] ❌ Gmail SMTP blocked (cloud host?) — set BREVO_API_KEY for production:', err.message);
-    } else {
-      console.log('[Email] ✅ Gmail SMTP verified');
-    }
-  });
+  console.log('[Email] ✅ Brevo transport configured via HTTPS');
 
 } else if (process.env.RESEND_API_KEY) {
-  // ── Priority 3: Resend (free tier limited to account owner email) ──
+  // ── Priority 3: Resend API ──
   const { Resend } = require('resend');
   const resend = new Resend(process.env.RESEND_API_KEY);
   transporter = {
@@ -75,11 +68,9 @@ if (process.env.BREVO_API_KEY) {
     },
   };
   transportType = 'resend';
-  console.log('[Email] ⚠️  Resend transport — free tier only sends to account owner email');
-
+  console.log('[Email] ⚠️ Resend transport configured');
 } else {
   console.warn('[Email] ⚠️ No email credentials set — email sending disabled');
-  console.warn('[Email]   Set BREVO_API_KEY (recommended), or GMAIL_USER + GMAIL_APP_PASSWORD, or RESEND_API_KEY');
 }
 
 // ================================================================
